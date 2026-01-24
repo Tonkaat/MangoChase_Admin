@@ -57,13 +57,20 @@ class AuthService {
     return auth.currentUser;
   }
 
-  async createUserProfile(profile: Omit<UserProfile, 'uid'> & { uid: string }): Promise<void> {
-    const userRef = doc(db, 'users', profile.uid);
-    await setDoc(userRef, {
-      ...profile,
-      createdAt: profile.createdAt.toISOString(),
-    });
-  }
+async createUserProfile(profile: Omit<UserProfile, 'uid'> & { uid: string }): Promise<void> {
+  const userRef = doc(db, 'users', profile.uid);
+  await setDoc(userRef, {
+    ...profile,
+    farmId: profile.farmId || '', // Match Flutter's structure
+    settings: profile.settings || {
+      notifications: true,
+      darkMode: false,
+      businessMode: false,
+      hasCompletedSetup: false,
+    },
+    createdAt: profile.createdAt.toISOString(),
+  });
+}
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
     const userRef = doc(db, 'users', uid);

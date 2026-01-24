@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ProtectedRoute } from "@/components/common/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
+import { useFarm } from '@/providers/farm-provider';
 import Dashboard from "@/pages/Dashboard";
 import FarmManagement from "@/pages/FarmManagement";
 import TreeManagement from "@/pages/TreeManagement";
@@ -12,12 +13,14 @@ import Analytics from "@/pages/Analytics";
 import KnowledgeBase from "@/pages/KnowledgeBase";
 import Settings from "@/pages/Settings";
 import Login from "@/pages/auth/Login";
+import FarmSetup from "@/pages/FarmSetup";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+
 
   if (loading) {
     return (
@@ -36,11 +39,13 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 export function AppRoutes() {
+  const { selectedFarmId } = useFarm();
   return (
     <Routes>
       {/* Public routes - redirect to dashboard if logged in */}
       <Route path="login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
+      <Route path="setup" element={<PublicRoute><FarmSetup /></PublicRoute>} />
       
       {/* Protected routes */}
       <Route
@@ -52,7 +57,10 @@ export function AppRoutes() {
       >
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="farms" element={<FarmManagement />} />
-        <Route path="trees" element={<TreeManagement />} />
+      <Route 
+        path="trees" 
+        element={<TreeManagement farmId={selectedFarmId || ''} />} 
+      />
         <Route path="users" element={<UserManagement />} />
         <Route path="scheduling" element={<Scheduling />} />
         <Route path="analytics" element={<Analytics />} />

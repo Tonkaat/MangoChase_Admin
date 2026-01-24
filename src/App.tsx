@@ -6,12 +6,14 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppRoutes } from "@/routes";
 import Index from "./pages/Index";
 import { AuthProvider } from '@/providers/auth-provider';
+import { FarmProvider } from '@/providers/farm-provider';
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider> {/* ← Add this wrapper */}
+      <FarmProvider> {/* Add this */}
       <TooltipProvider>
         <Toaster />
         <Sonner />
@@ -22,6 +24,7 @@ const App = () => (
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
+      </FarmProvider> {/* ← Close wrapper here */}
     </AuthProvider> {/* ← Close wrapper here */}
   </QueryClientProvider>
 );
