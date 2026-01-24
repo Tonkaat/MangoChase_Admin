@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+// src/pages/TreeManagement.tsx
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { TreeInventoryTable } from "@/components/trees/TreeInventoryTable";
@@ -9,7 +10,20 @@ import { QRCodeModal } from "@/components/trees/QRCodeModal";
 import { ClusterManagement } from "@/components/trees/ClusterManagement";
 import { TreeStatsCards } from "@/components/trees/TreeStatsCards";
 import { AddTreeModal } from "@/components/trees/AddTreeModal";
-import { Tree, TreeFilter, Cluster, TreeStats, autoCalculateGrowthStage } from "@/types/tree.types";
+import { AddEditClusterModal } from "@/components/trees/AddEditClusterModal";
+import { 
+  Tree, 
+  TreeFilter, 
+  Cluster, 
+  TreeStats, 
+  TreeData,
+  ClusterData,
+  autoCalculateGrowthStage,
+  convertFirestoreTree as convertFirestoreTreeHelper,
+  convertFirestoreCluster as convertFirestoreClusterHelper,
+  normalizeHealthStatus,
+  normalizeGrowthStage
+} from "@/types/tree.types";
 import { Plus, Download, Upload, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,8 +36,39 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { treeService } from "@/services/treeService";
-import { farmService } from "@/services/farmService";
+import { firebaseService } from "@/services/firebase";
+import { treeNamingService } from "@/services/firebase/treeNamingService";
+import { auth } from "@/config/firebase";
+
+// Types for Firestore data
+interface FirestoreTree {
+  id: string;
+  tree_id?: string;
+  tree_name?: string;
+  type?: string;
+  healthStatus?: string;
+  growthStage?: string;
+  cluster?: string;
+  flagged?: boolean;
+  variety?: string;
+  location?: string;
+  notes?: string;
+  plantedDate?: any;
+  lastInspection?: any;
+  createdAt?: any;
+  updatedAt?: any;
+  farmId?: string;
+}
+
+interface FirestoreCluster {
+  id: string;
+  name: string;
+  description?: string;
+  location?: string;
+  createdAt?: any;
+  treeCount?: number;
+  farmId?: string;
+}
 
 const initialFilters: TreeFilter = {
   search: "",
@@ -33,93 +78,120 @@ const initialFilters: TreeFilter = {
   flagged: "all",
 };
 
-interface TreeManagementProps {
-  farmId: string; // Pass the current farm ID as a prop
-}
-
-export default function TreeManagement({ farmId }: TreeManagementProps) {
+export default function TreeManagement() {
+  const [farmId, setFarmId] = useState<string>("");
   const [trees, setTrees] = useState<Tree[]>([]);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
   const [filters, setFilters] = useState<TreeFilter>(initialFilters);
   const [selectedTrees, setSelectedTrees] = useState<string[]>([]);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [viewingTree, setViewingTree] = useState<Tree | null>(null);
   const [editingTree, setEditingTree] = useState<Tree | null>(null);
+  const [editingCluster, setEditingCluster] = useState<Cluster | null>(null);
   const [qrModalTrees, setQrModalTrees] = useState<Tree[]>([]);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddTreeModal, setShowAddTreeModal] = useState(false);
+  const [showAddClusterModal, setShowAddClusterModal] = useState(false);
   const [deleteConfirmTree, setDeleteConfirmTree] = useState<Tree | null>(null);
+  const [deleteConfirmCluster, setDeleteConfirmCluster] = useState<Cluster | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   
+  // Refs for Firebase listeners
+  const treesUnsubscribeRef = useRef<() => void>(() => {});
+  const clustersUnsubscribeRef = useRef<() => void>(() => {});
 
-  // Load trees from Firebase
-const loadTrees = useCallback(async () => {
-  if (!farmId) return;
-  
-  try {
-    setLoading(true);
-    const treesData = await treeService.getTrees(farmId);
-    
-    // Auto-calculate growth stages based on age
-    const updatedTrees = treesData.map(tree => ({
-      ...tree,
-      growthStage: autoCalculateGrowthStage(tree)
-    }));
-    
-    setTrees(updatedTrees);
-  } catch (error) {
-    console.error("Error loading trees:", error);
-    toast.error("Failed to load trees");
-  } finally {
-    setLoading(false);
-  }
-}, [farmId]);
-
-  // Initial load
+  // Get farmId from current user
   useEffect(() => {
-    loadTrees();
-  }, [loadTrees]);
-
-  // Derive clusters from trees
-  const clusters: Cluster[] = useMemo(() => {
-    const clusterMap = new Map<string, Cluster>();
-    
-    trees.forEach((tree) => {
-      if (tree.cluster) {
-        const existing = clusterMap.get(tree.cluster);
-        if (existing) {
-          existing.treeCount++;
-          if (tree.healthStatus === "healthy") existing.healthyCount++;
-          if (tree.healthStatus === "warning") existing.warningCount++;
-          if (tree.healthStatus === "critical") existing.criticalCount++;
-        } else {
-          clusterMap.set(tree.cluster, {
-            id: tree.cluster,
-            name: tree.cluster,
-            farmId: tree.farmId,
-            treeCount: 1,
-            healthyCount: tree.healthStatus === "healthy" ? 1 : 0,
-            warningCount: tree.healthStatus === "warning" ? 1 : 0,
-            criticalCount: tree.healthStatus === "critical" ? 1 : 0,
-          });
+    const loadFarmId = async () => {
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          const profile = await firebaseService.getUserProfile();
+          if (profile?.farmId) {
+            setFarmId(profile.farmId);
+          } else {
+            toast.error("No farm associated with your account");
+            setLoading(false);
+          }
         }
+      } catch (error) {
+        console.error("Error loading farm ID:", error);
+        toast.error("Failed to load farm information");
+        setLoading(false);
       }
-    });
+    };
 
-    return Array.from(clusterMap.values()).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-  }, [trees]);
+    loadFarmId();
+
+    // Cleanup function
+    return () => {
+      treesUnsubscribeRef.current();
+      clustersUnsubscribeRef.current();
+    };
+  }, []);
+
+  // Helper to convert Firestore tree to Tree type (FIXED)
+  const convertFirestoreTree = (firestoreTree: FirestoreTree): Tree => {
+    // Use the helper function from tree.types.ts
+    return convertFirestoreTreeHelper({
+      id: firestoreTree.id,
+      ...firestoreTree
+    });
+  };
+
+  // Helper to convert Firestore cluster to Cluster type (FIXED)
+  const convertFirestoreCluster = (firestoreCluster: FirestoreCluster): Cluster => {
+    const treeCount = trees.filter(tree => tree.cluster === firestoreCluster.name).length;
+    
+    // Use the helper function from tree.types.ts
+    return convertFirestoreClusterHelper({
+      id: firestoreCluster.id,
+      ...firestoreCluster
+    }, treeCount);
+  };
+
+  // Setup real-time listeners for trees and clusters
+  useEffect(() => {
+    if (!farmId) return;
+
+    const setupListeners = () => {
+      // Setup trees listener
+      treesUnsubscribeRef.current = firebaseService.getTrees(farmId, (snapshot) => {
+        const firestoreTrees: FirestoreTree[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        const convertedTrees = firestoreTrees.map(convertFirestoreTree);
+        setTrees(convertedTrees);
+        setLoading(false);
+      });
+
+      // Setup clusters listener
+      clustersUnsubscribeRef.current = firebaseService.getClusters(farmId, (snapshot) => {
+        const firestoreClusters: FirestoreCluster[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        const convertedClusters = firestoreClusters.map(convertFirestoreCluster);
+        setClusters(convertedClusters);
+      });
+    };
+
+    setupListeners();
+  }, [farmId]);
 
   const clusterNames = useMemo(() => clusters.map((c) => c.name), [clusters]);
 
   // Calculate stats
   const stats: TreeStats = useMemo(() => ({
     total: trees.length,
-    healthy: trees.filter((t) => t.healthStatus === "healthy").length,
-    warning: trees.filter((t) => t.healthStatus === "warning").length,
-    critical: trees.filter((t) => t.healthStatus === "critical").length,
+    healthy: trees.filter((t) => t.healthStatus === "Healthy" || t.healthStatus === "healthy").length,
+    warning: trees.filter((t) => t.healthStatus === "Warning" || t.healthStatus === "warning").length,
+    critical: trees.filter((t) => t.healthStatus === "Critical" || t.healthStatus === "critical").length,
     flagged: trees.filter((t) => t.flagged).length,
     clusters: clusters.length,
   }), [trees, clusters]);
@@ -133,7 +205,9 @@ const loadTrees = useCallback(async () => {
         const search = filters.search.toLowerCase();
         const matches =
           tree.id.toLowerCase().includes(search) ||
-          tree.type.toLowerCase().includes(search) ||
+          tree.tree_id?.toLowerCase().includes(search) ||
+          tree.tree_name?.toLowerCase().includes(search) ||
+          tree.type?.toLowerCase().includes(search) ||
           tree.variety?.toLowerCase().includes(search) ||
           tree.cluster?.toLowerCase().includes(search);
         if (!matches) return false;
@@ -161,10 +235,34 @@ const loadTrees = useCallback(async () => {
   // Handlers
   const handleSync = useCallback(async () => {
     setSyncing(true);
-    await loadTrees();
-    setSyncing(false);
-    toast.success("Trees synced successfully");
-  }, [loadTrees]);
+    // Manually reload data by re-establishing listeners
+    treesUnsubscribeRef.current();
+    clustersUnsubscribeRef.current();
+    
+    setTimeout(() => {
+      if (farmId) {
+        treesUnsubscribeRef.current = firebaseService.getTrees(farmId, (snapshot) => {
+          const firestoreTrees: FirestoreTree[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          const convertedTrees = firestoreTrees.map(convertFirestoreTree);
+          setTrees(convertedTrees);
+        });
+
+        clustersUnsubscribeRef.current = firebaseService.getClusters(farmId, (snapshot) => {
+          const firestoreClusters: FirestoreCluster[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          const convertedClusters = firestoreClusters.map(convertFirestoreCluster);
+          setClusters(convertedClusters);
+        });
+      }
+      setSyncing(false);
+      toast.success("Data synced successfully");
+    }, 100);
+  }, [farmId]);
 
   const handleClearFilters = useCallback(() => {
     setFilters(initialFilters);
@@ -176,7 +274,7 @@ const loadTrees = useCallback(async () => {
 
   const handleEditTree = useCallback((tree: Tree) => {
     setEditingTree(tree);
-    setShowAddModal(true);
+    setShowAddTreeModal(true);
     setViewingTree(null);
   }, []);
 
@@ -186,17 +284,11 @@ const loadTrees = useCallback(async () => {
   }, []);
 
   const handleToggleFlag = useCallback(async (tree: Tree) => {
+    if (!farmId) return;
+    
     try {
       const newFlaggedState = !tree.flagged;
-      await treeService.flagTree(farmId, tree.id, newFlaggedState);
-      
-      setTrees((prev) =>
-        prev.map((t) =>
-          t.id === tree.id
-            ? { ...t, flagged: newFlaggedState, updatedAt: new Date() }
-            : t
-        )
-      );
+      await firebaseService.flagTree(farmId, tree.id, newFlaggedState);
       
       toast.success(newFlaggedState ? "Tree flagged for attention" : "Flag removed");
       setViewingTree(null);
@@ -212,11 +304,10 @@ const loadTrees = useCallback(async () => {
   }, []);
 
   const confirmDeleteTree = useCallback(async () => {
-    if (!deleteConfirmTree) return;
+    if (!deleteConfirmTree || !farmId) return;
 
     try {
-      await treeService.deleteTree(farmId, deleteConfirmTree.id);
-      setTrees((prev) => prev.filter((t) => t.id !== deleteConfirmTree.id));
+      await firebaseService.deleteTree(farmId, deleteConfirmTree.id);
       toast.success("Tree deleted successfully");
       setDeleteConfirmTree(null);
     } catch (error) {
@@ -225,57 +316,66 @@ const loadTrees = useCallback(async () => {
     }
   }, [deleteConfirmTree, farmId]);
 
-  const handleAddTree = useCallback(async (data: Partial<Tree>) => {
+  // FIXED: Updated handleAddTree function
+  const handleAddTree = useCallback(async (data: TreeData) => {
+    if (!farmId || !data.variety) return;
+    
     try {
       if (editingTree) {
-        // Update existing tree
-        await treeService.updateTree(farmId, editingTree.id, data);
+        // For updates, use firebaseService.updateTree directly
+        const updates: TreeData = {};
         
-        setTrees((prev) =>
-          prev.map((t) =>
-            t.id === editingTree.id
-              ? { ...t, ...data, updatedAt: new Date() }
-              : t
-          )
-        );
+        if (data.type) updates.type = data.type;
+        if (data.variety) updates.variety = data.variety;
+        if (data.healthStatus) updates.healthStatus = normalizeHealthStatus(data.healthStatus);
+        if (data.growthStage) updates.growthStage = normalizeGrowthStage(data.growthStage);
+        if (data.cluster !== undefined) updates.cluster = data.cluster || undefined;
+        if (data.notes !== undefined) updates.notes = data.notes;
+        if (data.location !== undefined) updates.location = data.location;
+        if (data.plantedDate) updates.plantedDate = data.plantedDate;
+        
+        updates.lastInspection = new Date();
+        
+        await firebaseService.updateTree(farmId, editingTree.id, updates);
         
         toast.success("Tree updated successfully");
         setEditingTree(null);
       } else {
-        // Create new tree
-        const treeId = await treeService.addTree(farmId, {
-          type: data.type || "Unknown",
+        // For new trees, use treeNamingService
+        const treeData = await treeNamingService.generateTreeData({
+          farmId,
           variety: data.variety,
-          healthStatus: data.healthStatus || "unknown",
-          growthStage: data.growthStage || "seedling",
-          cluster: data.cluster,
-          flagged: false,
-          notes: data.notes,
-          location: data.location,
+          additionalData: {
+            type: data.type || "Mango",
+            healthStatus: normalizeHealthStatus(data.healthStatus || "Healthy"),
+            growthStage: normalizeGrowthStage(data.growthStage || "seedling"),
+            cluster: data.cluster || undefined, // undefined for no cluster
+            flagged: false,
+            notes: data.notes,
+            location: data.location,
+            plantedDate: data.plantedDate || new Date(),
+          }
         });
 
-        // Reload trees to get the newly created tree with all fields
-        await loadTrees();
+        await firebaseService.addTree(farmId, treeData);
         toast.success("Tree added successfully");
       }
-    } catch (error) {
+
+    } catch (error: any) {
       console.error("Error saving tree:", error);
-      toast.error("Failed to save tree");
+      toast.error(error.message || "Failed to save tree");
     }
-  }, [editingTree, farmId, loadTrees]);
+  }, [editingTree, farmId]);
 
   // Bulk operations
   const handleBulkFlag = useCallback(async (flag: boolean) => {
+    if (!farmId || selectedTrees.length === 0) return;
+    
     try {
-      await treeService.batchFlagTrees(farmId, selectedTrees, flag);
-
-      setTrees((prev) =>
-        prev.map((t) =>
-          selectedTrees.includes(t.id)
-            ? { ...t, flagged: flag, updatedAt: new Date() }
-            : t
-        )
-      );
+      // Update each tree individually
+      for (const treeId of selectedTrees) {
+        await firebaseService.flagTree(farmId, treeId, flag);
+      }
 
       toast.success(`${selectedTrees.length} trees ${flag ? "flagged" : "unflagged"}`);
       setSelectedTrees([]);
@@ -286,22 +386,15 @@ const loadTrees = useCallback(async () => {
   }, [selectedTrees, farmId]);
 
   const handleBulkChangeCluster = useCallback(async (cluster: string) => {
+    if (!farmId || selectedTrees.length === 0) return;
+    
     if (cluster === "__new__") {
-      toast.info("Create new cluster functionality coming soon");
+      setShowAddClusterModal(true);
       return;
     }
 
     try {
-      await treeService.batchUpdateTreesCluster(farmId, selectedTrees, cluster);
-
-      setTrees((prev) =>
-        prev.map((t) =>
-          selectedTrees.includes(t.id)
-            ? { ...t, cluster, updatedAt: new Date() }
-            : t
-        )
-      );
-
+      await firebaseService.batchUpdateTreesCluster(farmId, selectedTrees, cluster);
       toast.success(`${selectedTrees.length} trees moved to ${cluster}`);
       setSelectedTrees([]);
     } catch (error) {
@@ -315,10 +408,14 @@ const loadTrees = useCallback(async () => {
   }, []);
 
   const confirmBulkDelete = useCallback(async () => {
+    if (!farmId || selectedTrees.length === 0) return;
+    
     try {
-      await treeService.batchDeleteTrees(farmId, selectedTrees);
+      // Delete each tree individually
+      for (const treeId of selectedTrees) {
+        await firebaseService.deleteTree(farmId, treeId);
+      }
 
-      setTrees((prev) => prev.filter((t) => !selectedTrees.includes(t.id)));
       toast.success(`${selectedTrees.length} trees deleted`);
       setSelectedTrees([]);
       setShowBulkDeleteConfirm(false);
@@ -334,17 +431,56 @@ const loadTrees = useCallback(async () => {
     setShowQRModal(true);
   }, [selectedTrees, trees]);
 
-  const handleCreateCluster = useCallback((name: string) => {
-    toast.success(`Cluster "${name}" created`);
+  // Cluster handlers (FIXED: Uses ClusterData type)
+  const handleCreateCluster = useCallback(() => {
+    setEditingCluster(null);
+    setShowAddClusterModal(true);
   }, []);
 
   const handleEditCluster = useCallback((cluster: Cluster) => {
-    toast.info("Edit cluster functionality coming soon");
+    setEditingCluster(cluster);
+    setShowAddClusterModal(true);
   }, []);
 
   const handleDeleteCluster = useCallback((cluster: Cluster) => {
-    toast.info("Delete cluster functionality coming soon");
+    setDeleteConfirmCluster(cluster);
   }, []);
+
+  const confirmDeleteCluster = useCallback(async () => {
+    if (!deleteConfirmCluster || !farmId) return;
+
+    try {
+      await firebaseService.deleteClusterFromCollection(farmId, deleteConfirmCluster.name);
+      
+      toast.success(`Cluster "${deleteConfirmCluster.name}" deleted`);
+      setDeleteConfirmCluster(null);
+    } catch (error) {
+      console.error("Error deleting cluster:", error);
+      toast.error("Failed to delete cluster");
+    }
+  }, [deleteConfirmCluster, farmId]);
+
+  // FIXED: Updated handleSubmitCluster function
+  const handleSubmitCluster = useCallback(async (data: ClusterData) => {
+    if (!farmId || !data.name) return;
+
+    try {
+      if (editingCluster) {
+        // Rename cluster
+        await firebaseService.renameCluster(farmId, editingCluster.name, data.name);
+        toast.success("Cluster renamed successfully");
+      } else {
+        // Create new cluster
+        await firebaseService.addCluster(farmId, data.name);
+        toast.success(`Cluster "${data.name}" created successfully`);
+      }
+
+      setEditingCluster(null);
+    } catch (error: any) {
+      console.error("Error saving cluster:", error);
+      throw error;
+    }
+  }, [editingCluster, farmId]);
 
   const handleGenerateClusterQR = useCallback((cluster: Cluster) => {
     const clusterTrees = trees.filter((t) => t.cluster === cluster.name);
@@ -352,7 +488,7 @@ const loadTrees = useCallback(async () => {
     setShowQRModal(true);
   }, [trees]);
 
-  if (loading) {
+  if (loading && !farmId) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -377,7 +513,7 @@ const loadTrees = useCallback(async () => {
           <Button variant="outline" size="sm">
             <Download className="mr-2 h-4 w-4" /> Export
           </Button>
-          <Button variant="leaf" onClick={() => setShowAddModal(true)}>
+          <Button variant="leaf" onClick={() => setShowAddTreeModal(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add Tree
           </Button>
         </div>
@@ -446,15 +582,17 @@ const loadTrees = useCallback(async () => {
       </div>
 
       {/* Bulk Operations Panel */}
-      <BulkOperationsPanel
-        selectedCount={selectedTrees.length}
-        clusters={clusterNames}
-        onClearSelection={() => setSelectedTrees([])}
-        onBulkFlag={handleBulkFlag}
-        onBulkChangeCluster={handleBulkChangeCluster}
-        onBulkDelete={handleBulkDelete}
-        onBulkGenerateQR={handleBulkGenerateQR}
-      />
+      {selectedTrees.length > 0 && (
+        <BulkOperationsPanel
+          selectedCount={selectedTrees.length}
+          clusters={clusterNames}
+          onClearSelection={() => setSelectedTrees([])}
+          onBulkFlag={handleBulkFlag}
+          onBulkChangeCluster={handleBulkChangeCluster}
+          onBulkDelete={handleBulkDelete}
+          onBulkGenerateQR={handleBulkGenerateQR}
+        />
+      )}
 
       {/* Tree Details Drawer */}
       <TreeDetailsDrawer
@@ -475,9 +613,9 @@ const loadTrees = useCallback(async () => {
 
       {/* Add/Edit Tree Modal */}
       <AddTreeModal
-        open={showAddModal}
+        open={showAddTreeModal}
         onOpenChange={(open) => {
-          setShowAddModal(open);
+          setShowAddTreeModal(open);
           if (!open) setEditingTree(null);
         }}
         clusters={clusterNames}
@@ -485,7 +623,19 @@ const loadTrees = useCallback(async () => {
         editingTree={editingTree}
       />
 
-      {/* Delete Confirmation */}
+      {/* Add/Edit Cluster Modal */}
+      <AddEditClusterModal
+        open={showAddClusterModal}
+        onOpenChange={(open) => {
+          setShowAddClusterModal(open);
+          if (!open) setEditingCluster(null);
+        }}
+        onSubmit={handleSubmitCluster}
+        editingCluster={editingCluster}
+        existingClusterNames={clusterNames}
+      />
+
+      {/* Delete Tree Confirmation */}
       <AlertDialog
         open={Boolean(deleteConfirmTree)}
         onOpenChange={(open) => !open && setDeleteConfirmTree(null)}
@@ -494,7 +644,7 @@ const loadTrees = useCallback(async () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Tree</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete tree {deleteConfirmTree?.id.slice(0, 8)}?
+              Are you sure you want to delete tree {deleteConfirmTree?.tree_name || deleteConfirmTree?.id.slice(0, 8)}?
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -505,6 +655,32 @@ const loadTrees = useCallback(async () => {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Cluster Confirmation */}
+      <AlertDialog
+        open={Boolean(deleteConfirmCluster)}
+        onOpenChange={(open) => !open && setDeleteConfirmCluster(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Cluster</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete cluster "{deleteConfirmCluster?.name}"?
+              This will remove the cluster assignment from {deleteConfirmCluster?.treeCount || 0} tree(s).
+              The trees themselves will not be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteCluster}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Cluster
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

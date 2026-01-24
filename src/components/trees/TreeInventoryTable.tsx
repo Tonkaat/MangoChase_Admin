@@ -32,10 +32,16 @@ interface TreeInventoryTableProps {
 }
 
 const healthStatusConfig: Record<HealthStatus, { label: string; className: string }> = {
+  // Lowercase versions
   healthy: { label: "Healthy", className: "bg-brand-leaf/20 text-brand-leaf border-brand-leaf/30" },
   warning: { label: "Warning", className: "bg-brand-mango/20 text-brand-mango border-brand-mango/30" },
   critical: { label: "Critical", className: "bg-destructive/20 text-destructive border-destructive/30" },
   unknown: { label: "Unknown", className: "bg-muted text-muted-foreground border-muted" },
+  // Uppercase versions (point to same config)
+  Healthy: { label: "Healthy", className: "bg-brand-leaf/20 text-brand-leaf border-brand-leaf/30" },
+  Warning: { label: "Warning", className: "bg-brand-mango/20 text-brand-mango border-brand-mango/30" },
+  Critical: { label: "Critical", className: "bg-destructive/20 text-destructive border-destructive/30" },
+  Unknown: { label: "Unknown", className: "bg-muted text-muted-foreground border-muted" },
 };
 
 const growthStageLabels: Record<string, string> = {

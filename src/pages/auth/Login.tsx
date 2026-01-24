@@ -27,7 +27,11 @@ export default function Login() {
     try {
       await signIn(email, password);
       toast.success('Welcome back!');
-      navigate('/dashboard');
+      
+      // Always navigate to farm-setup
+      // SetupGuard will redirect to dashboard if setup is already complete
+      navigate('/farm-setup');
+      
     } catch (error: any) {
       toast.error(error.message || 'Failed to sign in');
     } finally {
@@ -59,7 +63,11 @@ export default function Login() {
       });
 
       toast.success('Signed in with Google!');
-      navigate('/dashboard');
+      
+      // Always navigate to farm-setup
+      // SetupGuard will redirect to dashboard if setup is already complete
+      navigate('/farm-setup');
+      
     } catch (error: any) {
       toast.error(error.message || 'Google sign-in failed');
     } finally {

@@ -38,6 +38,28 @@ const healthStatusConfig: Record<
   HealthStatus,
   { label: string; className: string; icon: React.ReactNode }
 > = {
+  // Capitalized versions
+  Healthy: {
+    label: "Healthy",
+    className: "bg-brand-leaf/20 text-brand-leaf",
+    icon: <Leaf className="h-4 w-4" />,
+  },
+  Warning: {
+    label: "Warning",
+    className: "bg-brand-mango/20 text-brand-mango",
+    icon: <AlertTriangle className="h-4 w-4" />,
+  },
+  Critical: {
+    label: "Critical",
+    className: "bg-destructive/20 text-destructive",
+    icon: <AlertTriangle className="h-4 w-4" />,
+  },
+  Unknown: {
+    label: "Unknown",
+    className: "bg-muted text-muted-foreground",
+    icon: <Activity className="h-4 w-4" />,
+  },
+  // Lowercase versions (point to the same config as capitalized)
   healthy: {
     label: "Healthy",
     className: "bg-brand-leaf/20 text-brand-leaf",
@@ -187,7 +209,7 @@ export function TreeDetailsDrawer({
                 </div>
               )}
 
-              {tree.location?.latitude && tree.location?.longitude && (
+              {/* {tree.location?.latitude && tree.location?.longitude && (
                 <div className="flex items-center gap-3 text-sm">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -200,7 +222,7 @@ export function TreeDetailsDrawer({
                     </div>
                   </div>
                 </div>
-              )}
+              )} */}
             </div>
           </div>
 

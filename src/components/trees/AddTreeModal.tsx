@@ -1,13 +1,16 @@
-import { useState } from "react";
+// src/components/trees/AddTreeModal.tsx
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -16,188 +19,357 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Tree, HealthStatus, GrowthStage } from "@/types/tree.types";
+import { Tree, TreeData, HealthStatus, GrowthStage, normalizeHealthStatus, normalizeGrowthStage } from "@/types/tree.types";
+import { Loader2, Calendar } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface AddTreeModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSubmit: (data: TreeData) => Promise<void>;
   clusters: string[];
-  onSubmit: (data: Partial<Tree>) => void;
   editingTree?: Tree | null;
 }
 
-const treeTypes = [
-  "Alphonso",
-  "Kesar",
-  "Langra",
-  "Dasheri",
-  "Totapuri",
-  "Banganapalli",
-  "Neelam",
-  "Mallika",
-  "Amrapali",
-  "Chausa",
-  "Other",
+// ⚠️ IMPORTANT: Match Flutter's HealthStatus values
+const HEALTH_STATUSES: { value: HealthStatus; label: string }[] = [
+  { value: "Healthy", label: "Healthy" },
+  { value: "Warning", label: "Warning" },
+  { value: "Critical", label: "Critical" },
+  { value: "Unknown", label: "Unknown" },
+  // Keep lowercase for backward compatibility
+  { value: "healthy", label: "Healthy (lowercase)" },
+  { value: "warning", label: "Warning (lowercase)" },
+  { value: "critical", label: "Critical (lowercase)" },
+  { value: "unknown", label: "Unknown (lowercase)" },
+];
+
+const GROWTH_STAGES: { value: GrowthStage; label: string }[] = [
+  { value: "seedling", label: "Seedling" },
+  { value: "juvenile", label: "Juvenile" },
+  { value: "mature", label: "Mature" },
+  { value: "flowering", label: "Flowering" },
+  { value: "fruiting", label: "Fruiting" },
+  // Capitalized versions for consistency
+  { value: "Seedling", label: "Seedling (capitalized)" },
+  { value: "Juvenile", label: "Juvenile (capitalized)" },
+  { value: "Mature", label: "Mature (capitalized)" },
+  { value: "Flowering", label: "Flowering (capitalized)" },
+  { value: "Fruiting", label: "Fruiting (capitalized)" },
 ];
 
 export function AddTreeModal({
   open,
   onOpenChange,
-  clusters,
   onSubmit,
+  clusters,
   editingTree,
 }: AddTreeModalProps) {
-  const [formData, setFormData] = useState<Partial<Tree>>(
-    editingTree || {
-      type: "",
-      variety: "",
-      healthStatus: "healthy",
-      growthStage: "mature",
-      cluster: "",
-      notes: "",
-    }
-  );
+  const [formData, setFormData] = useState({
+    type: "",
+    variety: "",
+    healthStatus: "Unknown" as HealthStatus,
+    growthStage: "seedling" as GrowthStage,
+    cluster: "", // Empty string for no cluster (matches Flutter's null)
+    notes: "",
+    location: "",
+    plantedDate: undefined as Date | undefined,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Reset form when modal opens/closes or editing tree changes
+  useEffect(() => {
+    if (open) {
+      if (editingTree) {
+        setFormData({
+          type: editingTree.type || "",
+          variety: editingTree.variety || "",
+          healthStatus: editingTree.healthStatus || "Unknown",
+          growthStage: editingTree.growthStage || "seedling",
+          cluster: editingTree.cluster || "", // Empty string for no cluster
+          notes: editingTree.notes || "",
+          location: editingTree.location || "",
+          plantedDate: editingTree.plantedDate,
+        });
+      } else {
+        setFormData({
+          type: "",
+          variety: "",
+          healthStatus: "Unknown",
+          growthStage: "seedling",
+          cluster: "", // Empty string for no cluster
+          notes: "",
+          location: "",
+          plantedDate: undefined,
+        });
+      }
+      setError("");
+    }
+  }, [open, editingTree]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.type) {
-      onSubmit(formData);
-      setFormData({
-        type: "",
-        variety: "",
-        healthStatus: "healthy",
-        growthStage: "mature",
-        cluster: "",
-        notes: "",
+    setError("");
+
+    // Validation
+    if (!formData.type.trim()) {
+      setError("Tree type is required");
+      return;
+    }
+
+    if (!formData.variety.trim()) {
+      setError("Variety is required for proper tree naming");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      // ⚠️ Prepare data in Firestore format (matching Flutter)
+      const treeData: TreeData = {
+        // Note: tree_id and tree_name will be generated by TreeNamingService
+        type: formData.type.trim(),
+        variety: formData.variety.trim(),
+        healthStatus: normalizeHealthStatus(formData.healthStatus), // Ensure proper casing
+        growthStage: normalizeGrowthStage(formData.growthStage),    // Ensure proper casing
+        cluster: formData.cluster.trim() || undefined, // undefined for no cluster (matches Flutter null)
+        flagged: false,
+        notes: formData.notes.trim() || undefined,
+        location: formData.location.trim() || undefined,
+        plantedDate: formData.plantedDate,
+        lastInspection: new Date(), // Always set current inspection time
+      };
+
+      // Remove undefined values
+      Object.keys(treeData).forEach(key => {
+        if (treeData[key] === undefined) {
+          delete treeData[key];
+        }
       });
+
+      await onSubmit(treeData);
       onOpenChange(false);
+    } catch (err: any) {
+      console.error("Error submitting tree:", err);
+      setError(err.message || "Failed to save tree. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const isEditing = Boolean(editingTree);
+  const updateField = <K extends keyof typeof formData>(
+    field: K,
+    value: typeof formData[K]
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="font-display">
-            {isEditing ? "Edit Tree" : "Add New Tree"}
-          </DialogTitle>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>
+              {editingTree ? "Edit Tree" : "Add New Tree"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingTree
+                ? "Update the tree information below."
+                : "Enter the details for the new tree. A unique tree ID and name will be generated automatically."}
+              {editingTree && (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Tree ID: {editingTree.tree_id}<br />
+                  Tree Name: {editingTree.tree_name}
+                </div>
+              )}
+            </DialogDescription>
+          </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-4 py-4">
+            {/* Tree Type */}
             <div className="space-y-2">
-              <Label htmlFor="type">Mango Type *</Label>
-              <Select
+              <Label htmlFor="tree-type">
+                Tree Type <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="tree-type"
+                placeholder="e.g., Mango, Apple, Orange"
                 value={formData.type}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, type: value })
-                }
+                onChange={(e) => updateField("type", e.target.value)}
+                disabled={submitting}
+                autoFocus
+              />
+            </div>
+
+            {/* Variety - REQUIRED for tree naming */}
+            <div className="space-y-2">
+              <Label htmlFor="tree-variety">
+                Variety <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="tree-variety"
+                placeholder="e.g., Carabao, Indian, Pico (used for tree naming)"
+                value={formData.variety}
+                onChange={(e) => updateField("variety", e.target.value)}
+                disabled={submitting}
+              />
+              <p className="text-xs text-muted-foreground">
+                This will be used to generate a unique tree name like "Tree_carabao_0001"
+              </p>
+            </div>
+
+            {/* Health Status and Growth Stage - Side by side */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="health-status">Health Status</Label>
+                <Select
+                  value={formData.healthStatus}
+                  onValueChange={(value) =>
+                    updateField("healthStatus", value as HealthStatus)
+                  }
+                  disabled={submitting}
+                >
+                  <SelectTrigger id="health-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HEALTH_STATUSES.map((status) => (
+                      <SelectItem key={status.value} value={status.value}>
+                        {status.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="growth-stage">Growth Stage</Label>
+                <Select
+                  value={formData.growthStage}
+                  onValueChange={(value) =>
+                    updateField("growthStage", value as GrowthStage)
+                  }
+                  disabled={submitting}
+                >
+                  <SelectTrigger id="growth-stage">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GROWTH_STAGES.map((stage) => (
+                      <SelectItem key={stage.value} value={stage.value}>
+                        {stage.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Cluster */}
+            <div className="space-y-2">
+              <Label htmlFor="cluster">Cluster (Optional)</Label>
+              <Select
+                value={formData.cluster}
+                onValueChange={(value) => updateField("cluster", value)}
+                disabled={submitting}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
+                <SelectTrigger id="cluster">
+                  <SelectValue placeholder="Select a cluster (optional)" />
                 </SelectTrigger>
                 <SelectContent>
-                  {treeTypes.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type}
+                  <SelectItem value="">No Cluster</SelectItem>
+                  {clusters.map((cluster) => (
+                    <SelectItem key={cluster} value={cluster}>
+                      {cluster}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Trees without a cluster will be assigned to "Default"
+              </p>
             </div>
 
+            {/* Location */}
             <div className="space-y-2">
-              <Label htmlFor="variety">Variety (optional)</Label>
+              <Label htmlFor="location">Location (Optional)</Label>
               <Input
-                id="variety"
-                placeholder="e.g., Organic"
-                value={formData.variety || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, variety: e.target.value })
-                }
+                id="location"
+                placeholder="e.g., Row 3, Position 15 or GPS coordinates"
+                value={formData.location}
+                onChange={(e) => updateField("location", e.target.value)}
+                disabled={submitting}
               />
             </div>
-          </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Planted Date */}
             <div className="space-y-2">
-              <Label>Health Status</Label>
-              <Select
-                value={formData.healthStatus}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, healthStatus: value as HealthStatus })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="healthy">Healthy</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="unknown">Unknown</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Planted Date (Optional)</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !formData.plantedDate && "text-muted-foreground"
+                    )}
+                    disabled={submitting}
+                  >
+                    <Calendar className="mr-2 h-4 w-4" />
+                    {formData.plantedDate ? (
+                      format(formData.plantedDate, "PPP")
+                    ) : (
+                      <span>Pick a date (optional)</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={formData.plantedDate}
+                    onSelect={(date) => updateField("plantedDate", date)}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">
+                Used to calculate growth stage if not specified
+              </p>
             </div>
 
+            {/* Notes */}
             <div className="space-y-2">
-              <Label>Growth Stage</Label>
-              <Select
-                value={formData.growthStage}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, growthStage: value as GrowthStage })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="seedling">Seedling</SelectItem>
-                  <SelectItem value="juvenile">Juvenile</SelectItem>
-                  <SelectItem value="mature">Mature</SelectItem>
-                  <SelectItem value="flowering">Flowering</SelectItem>
-                  <SelectItem value="fruiting">Fruiting</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="notes">Notes (Optional)</Label>
+              <Textarea
+                id="notes"
+                placeholder="Additional notes or observations"
+                value={formData.notes}
+                onChange={(e) => updateField("notes", e.target.value)}
+                disabled={submitting}
+                rows={3}
+              />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label>Cluster</Label>
-            <Select
-              value={formData.cluster || ""}
-              onValueChange={(value) =>
-                setFormData({ ...formData, cluster: value })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Assign to cluster (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">No Cluster</SelectItem>
-                {clusters.map((cluster) => (
-                  <SelectItem key={cluster} value={cluster}>
-                    {cluster}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
 
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              placeholder="Additional notes about this tree..."
-              value={formData.notes || ""}
-              onChange={(e) =>
-                setFormData({ ...formData, notes: e.target.value })
-              }
-              rows={3}
-            />
+            {/* Info Box */}
+            <div className="rounded-md bg-blue-50 p-3 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+              <div className="font-medium">Database Fields:</div>
+              <ul className="mt-1 list-inside list-disc">
+                <li><code>tree_id</code>: Auto-generated UUID</li>
+                <li><code>tree_name</code>: Auto-generated (Tree_variety_number)</li>
+                <li><code>lastInspection</code>: Set to current time</li>
+                <li><code>createdAt/updatedAt</code>: Auto-set timestamps</li>
+              </ul>
+            </div>
           </div>
 
           <DialogFooter>
@@ -205,11 +377,13 @@ export function AddTreeModal({
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
+              disabled={submitting}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={!formData.type}>
-              {isEditing ? "Save Changes" : "Add Tree"}
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {editingTree ? "Update Tree" : "Add Tree"}
             </Button>
           </DialogFooter>
         </form>

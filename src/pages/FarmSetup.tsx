@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+// src/pages/FarmSetup.tsx
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { BrandLogo } from "@/components/common/BrandLogo";
@@ -14,9 +15,9 @@ import {
   FarmSetupData, 
   VarietyConfig, 
   AgeGroupConfig,
-  generateUniqueId,
-  getGrowthStageForAge,
-  DEFAULT_MANGO_VARIETIES,
+  CROP_TYPES,
+  FARMING_TYPES,
+  getGrowthStageForAge
 } from "@/types/farm.types";
 import { 
   AlertDialog,
@@ -28,6 +29,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { firebaseService } from "@/services/firebase";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { v4 as uuidv4 } from "uuid";
 
 const TOTAL_STEPS = 5;
 
@@ -46,6 +50,7 @@ export default function FarmSetup() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSetup, setIsCheckingSetup] = useState(true);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [data, setData] = useState<FarmSetupData>(initialData);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -55,6 +60,40 @@ export default function FarmSetup() {
   const [createdTrees, setCreatedTrees] = useState(0);
   const [currentVariety, setCurrentVariety] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+
+  // Check if user has already completed setup
+  useEffect(() => {
+    checkExistingSetup();
+  }, []);
+
+  const checkExistingSetup = async () => {
+    try {
+      const user = firebaseService.getCurrentUser();
+      if (!user) {
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      // Get user profile to check if already has farm
+      const userProfile = await firebaseService.getUserProfile();
+      
+      if (userProfile?.farmId) {
+        const farmProfile = await firebaseService.getFarmProfile(userProfile.farmId);
+        
+        if (farmProfile?.setupCompleted) {
+          // User has already completed setup, redirect to dashboard
+          toast.info("Welcome back! Your farm is already set up.");
+          navigate('/dashboard', { replace: true });
+          return;
+        }
+      }
+      
+      setIsCheckingSetup(false);
+    } catch (error) {
+      console.error("Error checking setup:", error);
+      setIsCheckingSetup(false);
+    }
+  };
 
   // Update handlers
   const updateField = useCallback(<K extends keyof FarmSetupData>(
@@ -81,7 +120,7 @@ export default function FarmSetup() {
 
       case 1: // Farm Details
         if (!data.farmSize || data.farmSize <= 0) {
-          newErrors.farmSize = "Please enter a valid farm size";
+          newErrors.farmSize = "Please enter a valid farm size (hectares)";
         }
         if (!data.numberOfTrees || data.numberOfTrees <= 0) {
           newErrors.numberOfTrees = "Please enter a valid number of trees";
@@ -95,7 +134,7 @@ export default function FarmSetup() {
         if (data.varieties.length > 0) {
           const allocated = data.varieties.reduce((sum, v) => sum + v.quantity, 0);
           if (allocated !== data.numberOfTrees) {
-            toast.error(`Please allocate all ${data.numberOfTrees} trees`);
+            toast.error(`Please allocate all ${data.numberOfTrees} trees across varieties`);
             return false;
           }
         }
@@ -105,7 +144,7 @@ export default function FarmSetup() {
         if (data.ageGroups.length > 0) {
           const allocated = data.ageGroups.reduce((sum, g) => sum + g.quantity, 0);
           if (allocated !== data.numberOfTrees) {
-            toast.error(`Please allocate all ${data.numberOfTrees} trees`);
+            toast.error(`Please allocate all ${data.numberOfTrees} trees across age groups`);
             return false;
           }
         }
@@ -123,11 +162,11 @@ export default function FarmSetup() {
       case 1:
         return data.farmSize > 0 && data.numberOfTrees > 0 && data.numberOfTrees <= 100000;
       case 2:
-        if (data.varieties.length === 0) return true; // Skip allowed
+        if (data.varieties.length === 0) return true;
         const varietyTotal = data.varieties.reduce((sum, v) => sum + v.quantity, 0);
         return varietyTotal === data.numberOfTrees;
       case 3:
-        if (data.ageGroups.length === 0) return true; // Skip allowed
+        if (data.ageGroups.length === 0) return true;
         const ageTotal = data.ageGroups.reduce((sum, g) => sum + g.quantity, 0);
         return ageTotal === data.numberOfTrees;
       case 4:
@@ -156,14 +195,97 @@ export default function FarmSetup() {
   }, [currentStep]);
 
   const handleSkip = useCallback(() => {
-    // Only for variety and age steps
     if (currentStep === 2 || currentStep === 3) {
       setCurrentStep(prev => prev + 1);
       toast.info("Using default configuration");
+      
+      // Set defaults when skipping
+      if (currentStep === 2 && data.varieties.length === 0) {
+        // Add default single variety
+        const defaultVariety: VarietyConfig = {
+          id: uuidv4(),
+          name: data.cropType === "mango" ? "Carabao" : "Default",
+          quantity: data.numberOfTrees
+        };
+        updateField("varieties", [defaultVariety]);
+      }
+      
+      if (currentStep === 3 && data.ageGroups.length === 0) {
+        // Add default age groups
+        const defaultAgeGroups: AgeGroupConfig[] = [
+          { id: uuidv4(), age: 2, quantity: Math.floor(data.numberOfTrees * 0.2), label: "Young" },
+          { id: uuidv4(), age: 5, quantity: Math.floor(data.numberOfTrees * 0.5), label: "Mature" },
+          { id: uuidv4(), age: 10, quantity: Math.floor(data.numberOfTrees * 0.3), label: "Old" },
+        ];
+        updateField("ageGroups", defaultAgeGroups);
+      }
     }
-  }, [currentStep]);
+  }, [currentStep, data, updateField]);
 
-  // Setup completion
+  // Helper function to create trees based on variety and age distribution
+  const createTrees = async (farmId: string, varieties: VarietyConfig[], ageGroups: AgeGroupConfig[]) => {
+    if (varieties.length === 0 || ageGroups.length === 0) {
+      toast.error("Variety or age configuration missing");
+      return;
+    }
+
+    let currentCount = 0;
+    
+    // Distribute trees across varieties and ages
+    for (const variety of varieties) {
+      setCurrentVariety(variety.name);
+      
+      for (let i = 0; i < variety.quantity; i++) {
+        try {
+          // Determine tree age based on age group distribution
+          let age = 5; // default age
+          let ageIndex = 0;
+          let accumulated = 0;
+          
+          for (const ageGroup of ageGroups) {
+            accumulated += ageGroup.quantity;
+            if (i < accumulated) {
+              age = ageGroup.age;
+              break;
+            }
+            ageIndex++;
+          }
+          
+          const growthStage = getGrowthStageForAge(age);
+          
+          // Generate tree data using the tree naming service
+          const treeData = await firebaseService.generateTreeData({
+            farmId,
+            variety: variety.name,
+            additionalData: {
+              type: CROP_TYPES.find(c => c.value === data.cropType)?.label || "Mango",
+              healthStatus: "Healthy",
+              growthStage: growthStage.toLowerCase(),
+              cluster: "Default",
+              flagged: false,
+              plantedDate: new Date(Date.now() - age * 365 * 24 * 60 * 60 * 1000), // Approximate planted date
+              notes: `Created during farm setup. Variety: ${variety.name}, Age: ${age} years`,
+              lastInspection: new Date(),
+            }
+          });
+          
+          await firebaseService.addTree(farmId, treeData);
+          currentCount++;
+          setCreatedTrees(currentCount);
+          
+          // Small delay to show progress
+          if (currentCount % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
+        } catch (error) {
+          console.error(`Error creating tree ${currentCount + 1}:`, error);
+        }
+      }
+    }
+  };
+
+  // Setup completion with database integration
   const completeSetup = async () => {
     setIsLoading(true);
     setShowProgress(true);
@@ -171,73 +293,67 @@ export default function FarmSetup() {
     setIsComplete(false);
 
     try {
-      // Simulate farm creation
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Generate default varieties if not configured
-      let varietiesToUse = data.varieties;
-      if (varietiesToUse.length === 0) {
-        const defaultVarieties = data.cropType === 'mango' 
-          ? ['Carabao', 'Pico', 'Apple Mango'] 
-          : ['Standard'];
-        const perVariety = Math.floor(data.numberOfTrees / defaultVarieties.length);
-        const remainder = data.numberOfTrees % defaultVarieties.length;
-        
-        varietiesToUse = defaultVarieties.map((name, i) => ({
-          id: crypto.randomUUID(),
-          name,
-          quantity: perVariety + (i < remainder ? 1 : 0),
-        }));
+      const user = firebaseService.getCurrentUser();
+      if (!user) {
+        throw new Error("No authenticated user");
       }
 
-      // Generate default age groups if not configured
-      let ageGroupsToUse = data.ageGroups;
-      if (ageGroupsToUse.length === 0) {
-        const distribution = [
-          { age: 1, label: "Seedlings (1 year)", percent: 0.3 },
-          { age: 3, label: "Young (3 years)", percent: 0.3 },
-          { age: 7, label: "Mature (7 years)", percent: 0.3 },
-          { age: 15, label: "Old (15+ years)", percent: 0.1 },
-        ];
-        let remaining = data.numberOfTrees;
-        ageGroupsToUse = distribution.map((d, i) => {
-          const quantity = i === distribution.length - 1 
-            ? remaining 
-            : Math.round(data.numberOfTrees * d.percent);
-          remaining -= quantity;
-          return {
-            id: crypto.randomUUID(),
-            age: d.age,
-            label: d.label,
-            quantity: Math.max(0, quantity),
-          };
-        });
-      }
+      console.log("🚀 Starting farm setup...");
+      console.log("📊 Setup data:", data);
 
-      // Simulate tree creation with progress
-      let totalCreated = 0;
-      for (const variety of varietiesToUse) {
-        setCurrentVariety(variety.name);
-        
-        // Simulate batch creation
-        const batchSize = Math.min(50, variety.quantity);
-        for (let i = 0; i < variety.quantity; i += batchSize) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          totalCreated += Math.min(batchSize, variety.quantity - i);
-          setCreatedTrees(totalCreated);
+      // Create or update farm profile
+      const farmId = await firebaseService.createOrUpdateFarmProfile({
+        name: data.farmName,
+        location: data.farmLocation,
+        farmSize: data.farmSize,
+        numberOfTrees: data.numberOfTrees,
+        cropType: data.cropType,
+        farmingType: data.farmingType,
+        ownerId: user.uid,
+      });
+
+      console.log("✅ Farm created with ID:", farmId);
+
+      // Update user profile with farmId
+      await firebaseService.upsertUserProfile({
+        name: user.displayName || "Farmer",
+        email: user.email || "",
+        role: "owner",
+        farmId: farmId,
+        settings: {
+          hasCompletedSetup: true,
+          notifications: true,
+          darkMode: false,
+          businessMode: false,
         }
-      }
+      });
+
+      console.log("✅ User profile updated");
+
+      // Mark farm setup as complete
+      await firebaseService.updateFarmProfile(farmId, {
+        setupCompleted: true,
+        setupCompletedAt: new Date(),
+      });
+
+      console.log("✅ Farm marked as setup complete");
+
+      // Create trees
+      console.log("🌳 Creating trees...");
+      await createTrees(farmId, data.varieties, data.ageGroups);
 
       setIsComplete(true);
       toast.success("🎉 Farm setup completed!");
 
-      // Navigate to dashboard after a short delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      console.log("✅ Setup complete, navigating to dashboard...");
+
+      // Wait a moment to show completion, then navigate
+      await new Promise(resolve => setTimeout(resolve, 2000));
       navigate("/dashboard", { replace: true });
 
-    } catch (error) {
-      console.error("Setup error:", error);
-      toast.error("Setup failed. Please try again.");
+    } catch (error: any) {
+      console.error("❌ Setup error:", error);
+      toast.error(error.message || "Setup failed. Please try again.");
       setShowProgress(false);
     } finally {
       setIsLoading(false);
@@ -248,8 +364,42 @@ export default function FarmSetup() {
     setShowCancelDialog(true);
   };
 
-  const confirmCancel = () => {
-    navigate("/dashboard", { replace: true });
+  const confirmCancel = async () => {
+    try {
+      const user = firebaseService.getCurrentUser();
+      if (user) {
+        // Create a minimal farm profile if skipping setup
+        const farmId = await firebaseService.createOrUpdateFarmProfile({
+          name: "My Farm",
+          location: "Unknown",
+          farmSize: 1,
+          numberOfTrees: 0,
+          cropType: "mango",
+          farmingType: "personal",
+          ownerId: user.uid,
+        });
+
+        // Update user profile with minimal setup
+        await firebaseService.upsertUserProfile({
+          name: user.displayName || "Farmer",
+          email: user.email || "",
+          role: "owner",
+          farmId: farmId,
+          settings: {
+            hasCompletedSetup: false, // Mark as not complete
+            notifications: true,
+            darkMode: false,
+            businessMode: false,
+          }
+        });
+      }
+      
+      toast.info("Setup skipped. You can complete it later in Settings.");
+      navigate("/dashboard", { replace: true });
+    } catch (error) {
+      console.error("Error skipping setup:", error);
+      toast.error("Could not skip setup. Please try again.");
+    }
   };
 
   // Render current step content
@@ -303,6 +453,18 @@ export default function FarmSetup() {
     }
   };
 
+  // Show loading while checking setup status
+  if (isCheckingSetup) {
+    return (
+      <div className="min-h-screen bg-mango-field flex items-center justify-center">
+        <div className="text-center">
+          <LoadingSpinner className="w-12 h-12" />
+          <p className="mt-4 text-muted-foreground">Checking your account...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-mango-field flex flex-col">
       {/* Header */}
@@ -311,6 +473,7 @@ export default function FarmSetup() {
         <button
           onClick={handleCancelSetup}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          disabled={isLoading}
         >
           Skip for now
         </button>
