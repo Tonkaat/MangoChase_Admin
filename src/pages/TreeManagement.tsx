@@ -503,7 +503,7 @@ export default function TreeManagement() {
         <div>
           <h1 className="font-display text-3xl font-bold">Tree Management</h1>
           <p className="text-muted-foreground">
-            Track inventory, clusters, health status, and generate QR codes
+            Seb's Basement
           </p>
         </div>
         <div className="flex gap-2">

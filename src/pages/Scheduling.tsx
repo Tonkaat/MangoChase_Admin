@@ -1,8 +1,8 @@
-import { useState, useCallback, useMemo } from "react";
+// src/pages/Scheduling.tsx
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, isSameDay, addDays } from "date-fns";
-import { Plus, Sparkles, RefreshCw, Filter, Search } from "lucide-react";
+import { Plus, Sparkles, RefreshCw, Filter, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,133 +15,38 @@ import {
 import { ScheduleCalendar } from "@/components/scheduling/ScheduleCalendar";
 import { WeatherWidget } from "@/components/scheduling/WeatherWidget";
 import { ScheduleStats } from "@/components/scheduling/ScheduleStats";
+import type { WeatherData } from "@/types/task.types";
 import { TaskItem } from "@/components/scheduling/TaskItem";
 import { TaskDetailsSheet } from "@/components/scheduling/TaskDetailsSheet";
 import { AddTaskDialog } from "@/components/scheduling/AddTaskDialog";
 import { AIScheduleBanner } from "@/components/scheduling/AIScheduleBanner";
 import { AIGenerateDialog, AISuccessDialog } from "@/components/scheduling/AIGenerateDialog";
 import { EmptySchedule } from "@/components/scheduling/EmptySchedule";
-import type { Task, TaskType, WeatherData } from "@/types/task.types";
+import type { Task, TaskType } from "@/types/task.types";
 import { TASK_TYPE_CONFIG } from "@/types/task.types";
+import { Timestamp } from "firebase/firestore";
 
-// Demo data - replace with actual Firebase integration
-const generateDemoTasks = (): Task[] => {
-  const today = new Date();
-  return [
-    {
-      id: "1",
-      farmId: "farm-1",
-      title: "Morning Irrigation Check",
-      description: "Check all irrigation systems in Block A and B for proper water flow",
-      type: "watering",
-      status: "pending",
-      priority: "high",
-      dueDate: new Date(today.setHours(8, 0, 0, 0)),
-      clusterName: "Block A",
-      isAIGenerated: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: "2",
-      farmId: "farm-1",
-      title: "Fertilizer Application",
-      description: "Apply NPK fertilizer to young trees in Cluster 3",
-      type: "fertilizing",
-      status: "pending",
-      priority: "medium",
-      dueDate: new Date(new Date().setHours(10, 30, 0, 0)),
-      clusterName: "Cluster 3",
-      isAIGenerated: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: "3",
-      farmId: "farm-1",
-      title: "Pest Inspection",
-      description: "Check for signs of mango hopper and fruit fly in mature trees",
-      type: "inspection",
-      status: "done",
-      priority: "medium",
-      dueDate: new Date(new Date().setHours(14, 0, 0, 0)),
-      completedAt: new Date(),
-      clusterName: "Block B",
-      isAIGenerated: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: "4",
-      farmId: "farm-1",
-      title: "Prune Dead Branches",
-      description: "Remove dead and diseased branches from flagged trees",
-      type: "pruning",
-      status: "pending",
-      priority: "low",
-      dueDate: addDays(new Date(), 1),
-      clusterName: "Sector 2",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: "5",
-      farmId: "farm-1",
-      title: "Spray Pesticide",
-      description: "Apply organic pesticide to prevent aphid infestation",
-      type: "pestControl",
-      status: "pending",
-      priority: "urgent",
-      dueDate: addDays(new Date(), 2),
-      isAIGenerated: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    {
-      id: "6",
-      farmId: "farm-1",
-      title: "Harvest Ripe Mangoes",
-      description: "Collect mature mangoes from early fruiting trees",
-      type: "harvesting",
-      status: "pending",
-      priority: "high",
-      dueDate: addDays(new Date(), 3),
-      clusterName: "Block A",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ];
-};
+// Services
+import { taskService } from "@/services/firebase/taskService";
+import { farmService } from "@/services/firebase/farmService";
+import { weatherService } from "@/services/weatherService";
+import { createAIScheduler } from "@/services/aiSchedulingService";
+import { geminiService } from "@/services/aiService";
+import { notificationService } from "@/services/notificationService";
+import { useFarm } from "@/providers/farm-provider";
+import { auth } from "@/services/firebase/firebaseConfig";
 
-const demoWeather: WeatherData = {
-  location: "Manila, Philippines",
-  temperature: 32,
-  condition: "Partly Cloudy",
-  humidity: 75,
-  windSpeed: 12,
-  icon: "partly-cloudy",
-  lastUpdated: new Date(),
-  forecast: [
-    { date: new Date(), tempHigh: 33, tempLow: 26, condition: "Partly Cloudy", icon: "cloudy-sun", precipitation: 20 },
-    { date: addDays(new Date(), 1), tempHigh: 31, tempLow: 25, condition: "Rainy", icon: "rain", precipitation: 80 },
-    { date: addDays(new Date(), 2), tempHigh: 30, tempLow: 24, condition: "Thunderstorm", icon: "storm", precipitation: 90 },
-    { date: addDays(new Date(), 3), tempHigh: 32, tempLow: 25, condition: "Cloudy", icon: "cloudy", precipitation: 40 },
-    { date: addDays(new Date(), 4), tempHigh: 34, tempLow: 26, condition: "Sunny", icon: "sunny", precipitation: 10 },
-    { date: addDays(new Date(), 5), tempHigh: 33, tempLow: 26, condition: "Partly Cloudy", icon: "cloudy-sun", precipitation: 25 },
-    { date: addDays(new Date(), 6), tempHigh: 32, tempLow: 25, condition: "Sunny", icon: "sunny", precipitation: 5 },
-  ],
-};
-
-const demoClusters = [
-  { id: "1", name: "Block A" },
-  { id: "2", name: "Block B" },
-  { id: "3", name: "Cluster 3" },
-  { id: "4", name: "Sector 2" },
-];
+// Initialize AI Scheduler
+const aiScheduler = createAIScheduler(
+  weatherService,
+  geminiService,
+  notificationService
+);
 
 export default function Scheduling() {
+  const { selectedFarmId, setSelectedFarmId } = useFarm();
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [tasks, setTasks] = useState<Task[]>(generateDemoTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
@@ -152,12 +57,230 @@ export default function Scheduling() {
   const [generationStatus, setGenerationStatus] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TaskType | "all">("all");
+  const [isLoading, setIsLoading] = useState(true);
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [isWeatherLoading, setIsWeatherLoading] = useState(true);
+  const [clusters, setClusters] = useState<any[]>([]);
   
   // AI Generation state
-  const [canGenerate, setCanGenerate] = useState(true);
+  const [canGenerate, setCanGenerate] = useState(false);
   const [nextAvailableDate, setNextAvailableDate] = useState<Date | null>(null);
   const [lastGeneratedDate, setLastGeneratedDate] = useState<Date | null>(null);
   const [lastTasksGenerated, setLastTasksGenerated] = useState(0);
+
+  // Get farm details
+  const [currentFarm, setCurrentFarm] = useState<any>(null);
+
+  // Auto-load user's farm if not selected
+  useEffect(() => {
+    const loadUserFarm = async () => {
+      if (selectedFarmId) return; // Already have a farm selected
+      
+      try {
+        const userId = auth.currentUser?.uid;
+        if (!userId) {
+          console.log('No user logged in');
+          setIsLoading(false);
+          return;
+        }
+
+        const farms = await farmService.getUserFarms(userId);
+        if (farms.length > 0) {
+          // Auto-select the first (and likely only) farm
+          const farmId = farms[0].farmId;
+          console.log('🔄 Auto-selecting farm:', farmId);
+          setSelectedFarmId(farmId);
+        } else {
+          console.log('⚠️ No farms found for user');
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error('Error loading user farm:', error);
+        setIsLoading(false);
+      }
+    };
+
+    loadUserFarm();
+  }, [selectedFarmId, setSelectedFarmId]);
+
+  useEffect(() => {
+    if (!selectedFarmId) {
+      setCurrentFarm(null);
+      return;
+    }
+
+    const loadFarm = async () => {
+      try {
+        const farm = await farmService.getFarmProfile(selectedFarmId);
+        setCurrentFarm(farm);
+      } catch (error) {
+        console.error('Error loading farm:', error);
+      }
+    };
+
+    loadFarm();
+  }, [selectedFarmId]);
+
+  const farmId = selectedFarmId;
+  const farmLocation = currentFarm?.location || "Manila, Philippines";
+
+  // Load initial data
+  useEffect(() => {
+    if (!farmId) {
+      setIsLoading(false);
+      return;
+    }
+
+    const loadInitialData = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Load clusters - you can add cluster service later if needed
+        // For now using empty array
+        setClusters([]);
+        
+        // Load weather
+        await loadWeather();
+
+        // Check AI generation availability
+        await checkAIAvailability();
+        
+      } catch (error) {
+        console.error("Error loading initial data:", error);
+        toast.error("Failed to load scheduling data");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadInitialData();
+  }, [farmId, farmLocation]); // Added farmLocation dependency
+
+  // Subscribe to tasks
+  useEffect(() => {
+    if (!farmId) return;
+
+    console.log("📋 Subscribing to tasks for farm:", farmId);
+    
+    const unsubscribe = taskService.getTasks(farmId, (snapshot) => {
+      const tasksData: Task[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        
+        // Convert Firestore Timestamp to Date
+        let dueDate: Date;
+        if (data.dueDate instanceof Timestamp) {
+          dueDate = data.dueDate.toDate();
+        } else if (data.dueDate instanceof Date) {
+          dueDate = data.dueDate;
+        } else {
+          dueDate = new Date(data.dueDate);
+        }
+
+        let completedAt: Date | undefined;
+        if (data.completedAt) {
+          completedAt = data.completedAt instanceof Timestamp 
+            ? data.completedAt.toDate() 
+            : new Date(data.completedAt);
+        }
+
+        const task: Task = {
+          id: doc.id,
+          farmId: data.farmId || farmId,
+          title: data.title || "Untitled Task",
+          description: data.description || "",
+          type: data.type || "general",
+          status: data.status || "pending",
+          priority: data.priority || "medium",
+          dueDate,
+          completedAt,
+          assignedTo: data.assignedTo,
+          clusterId: data.clusterId,
+          clusterName: data.clusterName,
+          treeIds: data.treeIds,
+          notes: data.notes,
+          isAIGenerated: data.isAIGenerated || false,
+          createdAt: data.createdAt instanceof Timestamp 
+            ? data.createdAt.toDate() 
+            : new Date(data.createdAt || Date.now()),
+          updatedAt: data.updatedAt instanceof Timestamp 
+            ? data.updatedAt.toDate() 
+            : new Date(data.updatedAt || Date.now()),
+        };
+        
+        tasksData.push(task);
+      });
+
+      console.log(`✅ Loaded ${tasksData.length} tasks`);
+      setTasks(tasksData);
+    });
+
+    return () => {
+      console.log("🔌 Unsubscribing from tasks");
+      unsubscribe();
+    };
+  }, [farmId]);
+
+  // Load weather data
+  const loadWeather = async () => {
+    try {
+      setIsWeatherLoading(true);
+      const weather = await weatherService.getWeatherForecast(farmLocation, 7);
+      
+      // Transform weather data to match WeatherData type
+      const transformedWeather: WeatherData = {
+        location: weather.location?.name || farmLocation,
+        temperature: Math.round(weather.current?.temp_c || 0),
+        condition: weather.current?.condition?.text || "Unknown",
+        humidity: weather.current?.humidity || 0,
+        windSpeed: Math.round(weather.current?.wind_kph || 0),
+        icon: weather.current?.condition?.icon || "",
+        lastUpdated: new Date(weather.current?.last_updated || Date.now()),
+        forecast: (weather.forecast?.forecastday || []).map((day: any) => ({
+          date: new Date(day.date),
+          tempHigh: Math.round(day.day?.maxtemp_c || 0),
+          tempLow: Math.round(day.day?.mintemp_c || 0),
+          condition: day.day?.condition?.text || "Unknown",
+          icon: day.day?.condition?.icon || "",
+          precipitation: day.day?.daily_chance_of_rain || 0,
+        })),
+      };
+      
+      setWeatherData(transformedWeather);
+      console.log("🌤️ Weather data loaded");
+    } catch (error) {
+      console.error("Weather load error:", error);
+      toast.error("Could not load weather data");
+    } finally {
+      setIsWeatherLoading(false);
+    }
+  };
+
+  // Check AI generation availability
+  const checkAIAvailability = async () => {
+    if (!farmId) return;
+    
+    try {
+      const canGen = await aiScheduler.canGenerateSchedule(farmId);
+      setCanGenerate(canGen);
+
+      const lastGen = await aiScheduler.getLastGenerationTime(farmId);
+      setLastGeneratedDate(lastGen);
+
+      if (!canGen) {
+        const nextDate = await aiScheduler.getNextAvailableDate(farmId);
+        setNextAvailableDate(nextDate);
+      }
+
+      // Check and notify if ready
+      await aiScheduler.checkAndNotifyIfReady(farmId);
+      
+      console.log(`🤖 AI Generation: ${canGen ? 'Available' : 'Not Available'}`);
+    } catch (error) {
+      console.error("Error checking AI availability:", error);
+    }
+  };
 
   // Get tasks for selected date
   const tasksForSelectedDate = useMemo(() => {
@@ -173,118 +296,164 @@ export default function Scheduling() {
   }, [tasks, selectedDate, typeFilter, searchQuery]);
 
   // Toggle task status
-  const handleToggleStatus = useCallback((task: Task) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id === task.id) {
-        const newStatus = t.status === 'done' ? 'pending' : 'done';
-        return {
-          ...t,
-          status: newStatus,
-          completedAt: newStatus === 'done' ? new Date() : undefined,
-          updatedAt: new Date(),
-        };
-      }
-      return t;
-    }));
-    toast.success(task.status === 'done' ? 'Task marked as pending' : 'Task completed!');
-  }, []);
+  const handleToggleStatus = useCallback(async (task: Task) => {
+    if (!farmId) return;
+    
+    try {
+      const newStatus = task.status === 'done' ? 'pending' : 'done';
+      await taskService.updateTaskStatus(farmId, task.id, newStatus);
+      toast.success(newStatus === 'done' ? 'Task completed!' : 'Task marked as pending');
+    } catch (error) {
+      console.error("Error updating task status:", error);
+      toast.error("Failed to update task");
+    }
+  }, [farmId]);
 
   // Delete task
-  const handleDeleteTask = useCallback((task: Task) => {
-    setTasks(prev => prev.filter(t => t.id !== task.id));
-    toast.success('Task deleted');
-  }, []);
+  const handleDeleteTask = useCallback(async (task: Task) => {
+    if (!farmId) return;
+    
+    try {
+      await taskService.deleteTask(farmId, task.id);
+      toast.success('Task deleted');
+      setIsDetailsOpen(false);
+    } catch (error) {
+      console.error("Error deleting task:", error);
+      toast.error("Failed to delete task");
+    }
+  }, [farmId]);
 
   // Add new task
-  const handleAddTask = useCallback((taskData: Omit<Task, 'id' | 'farmId' | 'createdAt' | 'updatedAt'>) => {
-    const newTask: Task = {
-      ...taskData,
-      id: `task-${Date.now()}`,
-      farmId: "farm-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    setTasks(prev => [...prev, newTask]);
-    toast.success('Task created successfully');
-  }, []);
+  const handleAddTask = useCallback(async (taskData: Omit<Task, 'id' | 'farmId' | 'createdAt' | 'updatedAt'>) => {
+    if (!farmId) return;
+    
+    try {
+      await taskService.addTask({
+        farmId,
+        title: taskData.title,
+        dueDate: taskData.dueDate,
+        assignedTo: taskData.assignedTo,
+        status: taskData.status || 'pending',
+        description: taskData.description,
+        type: taskData.type,
+        clusterId: taskData.clusterId,
+        clusterName: taskData.clusterName,
+      });
+      
+      toast.success('Task created successfully');
+      setIsAddTaskOpen(false);
+    } catch (error) {
+      console.error("Error adding task:", error);
+      toast.error("Failed to create task");
+    }
+  }, [farmId]);
 
   // Generate AI Schedule
   const handleGenerateAI = useCallback(async () => {
+    if (!farmId) return;
+    
     setIsAIDialogOpen(false);
     setIsGenerating(true);
     setGenerationProgress(0);
-    setGenerationStatus("Analyzing weather data...");
+    setGenerationStatus("Starting AI schedule generation...");
 
-    // Simulate AI generation process
-    const steps = [
-      { progress: 15, status: "Analyzing weather data..." },
-      { progress: 30, status: "Evaluating farm health..." },
-      { progress: 50, status: "Checking seasonal requirements..." },
-      { progress: 70, status: "Optimizing task schedule..." },
-      { progress: 85, status: "Creating tasks..." },
-      { progress: 100, status: "Finalizing schedule..." },
-    ];
+    try {
+      // Simulate progress updates
+      const progressInterval = setInterval(() => {
+        setGenerationProgress(prev => {
+          const next = prev + 5;
+          return next > 95 ? 95 : next;
+        });
+      }, 500);
 
-    for (const step of steps) {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      setGenerationProgress(step.progress);
-      setGenerationStatus(step.status);
+      const statusUpdates = [
+        "Analyzing weather forecast...",
+        "Evaluating farm health...",
+        "Checking seasonal requirements...",
+        "Consulting AI model...",
+        "Optimizing task schedule...",
+        "Creating tasks...",
+        "Finalizing schedule...",
+      ];
+
+      let statusIndex = 0;
+      const statusInterval = setInterval(() => {
+        if (statusIndex < statusUpdates.length) {
+          setGenerationStatus(statusUpdates[statusIndex]);
+          statusIndex++;
+        }
+      }, 800);
+
+      // Get farm data
+      const farmData = await farmService.getFarmProfile(farmId);
+
+      // Generate schedule
+      const generatedTasks = await aiScheduler.generateOptimizedSchedule({
+        farmId,
+        location: farmLocation,
+        farmData,
+      });
+
+      clearInterval(progressInterval);
+      clearInterval(statusInterval);
+      
+      setGenerationProgress(100);
+      setGenerationStatus("Schedule generated successfully!");
+
+      // Update state
+      setLastTasksGenerated(generatedTasks.length);
+      await checkAIAvailability();
+
+      // Show success dialog
+      setTimeout(() => {
+        setIsGenerating(false);
+        setIsAISuccessOpen(true);
+        toast.success(`Created ${generatedTasks.length} optimized tasks!`);
+      }, 500);
+
+    } catch (error: any) {
+      console.error("AI generation error:", error);
+      setIsGenerating(false);
+      
+      if (error.message?.includes('Cannot generate')) {
+        toast.error(error.message);
+      } else {
+        toast.error("Failed to generate AI schedule. Please try again.");
+      }
     }
+  }, [farmId, farmLocation]);
 
-    // Generate mock AI tasks
-    const aiTasks: Task[] = [
-      {
-        id: `ai-${Date.now()}-1`,
-        farmId: "farm-1",
-        title: "Weather-based Irrigation Adjustment",
-        description: "Reduce irrigation due to expected rainfall tomorrow",
-        type: "watering",
-        status: "pending",
-        priority: "high",
-        dueDate: new Date(),
-        isAIGenerated: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: `ai-${Date.now()}-2`,
-        farmId: "farm-1",
-        title: "Pre-storm Harvest",
-        description: "Harvest mature fruits before the thunderstorm arrives",
-        type: "harvesting",
-        status: "pending",
-        priority: "urgent",
-        dueDate: addDays(new Date(), 1),
-        clusterName: "Block A",
-        isAIGenerated: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: `ai-${Date.now()}-3`,
-        farmId: "farm-1",
-        title: "Post-rain Fungicide Application",
-        description: "Apply fungicide to prevent fungal growth after heavy rain",
-        type: "pestControl",
-        status: "pending",
-        priority: "high",
-        dueDate: addDays(new Date(), 3),
-        isAIGenerated: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ];
+  // Refresh weather
+  const handleRefreshWeather = useCallback(async () => {
+    try {
+      weatherService.clearCache();
+      await loadWeather();
+      toast.success("Weather data refreshed");
+    } catch (error) {
+      toast.error("Failed to refresh weather");
+    }
+  }, [farmLocation]);
 
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    setTasks(prev => [...prev, ...aiTasks]);
-    setIsGenerating(false);
-    setCanGenerate(false);
-    setNextAvailableDate(addDays(new Date(), 7));
-    setLastGeneratedDate(new Date());
-    setLastTasksGenerated(aiTasks.length);
-    setIsAISuccessOpen(true);
-  }, []);
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Loading schedule...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!farmId) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center space-y-4">
+          <p className="text-muted-foreground">Please select a farm to view schedule</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-8">
@@ -325,7 +494,10 @@ export default function Scheduling() {
             onDateSelect={setSelectedDate}
             tasks={tasks}
           />
-          <WeatherWidget weather={demoWeather} />
+          <WeatherWidget 
+            weather={weatherData}
+            isLoading={isWeatherLoading}
+          />
         </div>
 
         {/* Right Column - Stats & Tasks */}
@@ -415,7 +587,7 @@ export default function Scheduling() {
         onClose={() => setIsAddTaskOpen(false)}
         onAddTask={handleAddTask}
         initialDate={selectedDate}
-        clusters={demoClusters}
+        clusters={clusters}
       />
 
       <AIGenerateDialog

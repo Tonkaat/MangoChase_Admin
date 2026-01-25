@@ -23,41 +23,49 @@ import {
 
 export class TaskService {
   
-  async addTask(options: {
-    farmId: string;
-    title: string;
-    dueDate: Date;
-    assignedTo?: string;
-    status?: string;
-    description?: string;
-    type?: string;
-    clusterId?: string;
-    clusterName?: string;
-  }): Promise<string> {
-    const { farmId, title, dueDate, assignedTo, status = 'pending', description, type, clusterId, clusterName } = options;
-    
-    const taskData: Record<string, any> = {
-      title,
-      assignedTo: assignedTo || auth.currentUser?.uid,
-      dueDate: Timestamp.fromDate(dueDate),
-      status,
-      description: description || '',
-      createdAt: serverTimestamp(),
-    };
+async addTask(options: {
+  farmId: string;
+  title: string;
+  dueDate: Date;
+  assignedTo?: string;
+  status?: string;
+  description?: string;
+  type?: string;
+  clusterId?: string;
+  clusterName?: string;
+}): Promise<string> {
+  const { farmId, title, dueDate, assignedTo, status = 'pending', description, type, clusterId, clusterName } = options;
+  
+  // Build task data object with only defined values
+  const taskData: Record<string, any> = {
+    title,
+    assignedTo: assignedTo || auth.currentUser?.uid,
+    dueDate: Timestamp.fromDate(dueDate),
+    status,
+    description: description || '',
+    createdAt: serverTimestamp(),
+  };
 
-    if (type) taskData.type = type;
-    taskData.clusterId = clusterId; // Store cluster assignment
-    taskData.clusterName = clusterName || clusterId; // Store cluster name for display
-
-    const taskRef = await addDoc(
-      collection(db, 'farms', farmId, 'tasks'),
-      taskData
-    );
-
-    console.log('✅ Task saved to Firestore:', title, 'type:', type, 'cluster:', clusterName || clusterId || 'All Clusters', 'dueDate:', dueDate);
-    return taskRef.id;
+  // Only add type if it's defined
+  if (type) {
+    taskData.type = type;
   }
 
+  // Only add clusterId if it's defined and not empty
+  if (clusterId && clusterId.trim() !== '') {
+    taskData.clusterId = clusterId;
+    taskData.clusterName = clusterName || clusterId;
+  }
+  // If clusterId is undefined, null, or empty, don't include it at all
+
+  const taskRef = await addDoc(
+    collection(db, 'farms', farmId, 'tasks'),
+    taskData
+  );
+
+  console.log('✅ Task saved to Firestore:', title, 'type:', type || 'general', 'cluster:', clusterId || 'All Clusters', 'dueDate:', dueDate);
+  return taskRef.id;
+}
   async updateTask(farmId: string, taskId: string, updates: Record<string, any>): Promise<void> {
     await updateDoc(
       doc(db, 'farms', farmId, 'tasks', taskId),

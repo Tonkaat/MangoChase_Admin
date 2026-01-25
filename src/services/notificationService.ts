@@ -1,1009 +1,938 @@
-// // src/services/notificationService.ts
-// import * as admin from 'firebase-admin';
-// import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-
-// if (!admin.apps.length) {
-//   admin.initializeApp();
-// }
-
-// // Types matching your Flutter code
-// interface WeatherData {
-//   current: {
-//     tempC: number;
-//     precipMm: number;
-//     humidity: number;
-//     windKph: number;
-//   };
-// }
-
-// enum AlertType {
-//   hot = 'hot',
-//   cold = 'cold',
-//   rain = 'rain',
-//   humidity = 'humidity',
-//   wind = 'wind',
-//   uv = 'uv',
-//   ideal = 'ideal'
-// }
-
-// interface Alert {
-//   type: AlertType;
-//   message: string;
-//   icon: string;
-//   severity: string;
-//   action: string;
-// }
-
-// export class NotificationService {
-//   private static instance: NotificationService;
-//   private messaging: admin.messaging.Messaging;
-//   private firestore: admin.firestore.Firestore;
-
-//   private constructor() {
-//     this.messaging = admin.messaging();
-//     this.firestore = admin.firestore();
-//   }
-
-//   static getInstance(): NotificationService {
-//     if (!NotificationService.instance) {
-//       NotificationService.instance = new NotificationService();
-//     }
-//     return NotificationService.instance;
-//   }
-
-//   // 🔔 Save notification to Firestore and optionally send push
-//   async saveNotification(params: {
-//     farmId: string;
-//     userId: string;
-//     type: string;
-//     title: string;
-//     body: string;
-//     data?: Record<string, any>;
-//     sendPushNotification?: boolean;
-//   }): Promise<string> {
-//     const { farmId, userId, type, title, body, data, sendPushNotification = true } = params;
-
-//     try {
-//       // Save to Firestore
-//       const notificationRef = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .add({
-//           userId,
-//           type,
-//           title,
-//           body,
-//           data: data || {},
-//           read: false,
-//           timestamp: FieldValue.serverTimestamp(),
-//         });
-
-//       console.log(`📝 Notification saved: ${notificationRef.id} for user ${userId}`);
-
-//       // Send push notification if requested
-//       if (sendPushNotification) {
-//         await this.sendPushNotificationToUser(userId, title, body, { ...data, type, notificationId: notificationRef.id });
-//       }
-
-//       return notificationRef.id;
-//     } catch (error) {
-//       console.error('❌ Error saving notification:', error);
-//       throw error;
-//     }
-//   }
-
-//   // 📱 Send push notification to specific user
-//   async sendPushNotificationToUser(
-//     userId: string,
-//     title: string,
-//     body: string,
-//     data?: Record<string, any>
-//   ): Promise<void> {
-//     try {
-//       // Get user's FCM token
-//       const userDoc = await this.firestore.collection('users').doc(userId).get();
-//       const userData = userDoc.data();
-//       const fcmToken = userData?.fcmToken;
-
-//       if (!fcmToken) {
-//         console.log(`⚠️ No FCM token found for user ${userId}`);
-//         return;
-//       }
-
-//       const message: admin.messaging.Message = {
-//         token: fcmToken,
-//         notification: {
-//           title,
-//           body,
-//         },
-//         data: {
-//           ...data,
-//           click_action: 'FLUTTER_NOTIFICATION_CLICK',
-//         },
-//         android: {
-//           priority: 'high',
-//           notification: {
-//             sound: 'mambo',
-//             channelId: 'farm_notifications',
-//           },
-//         },
-//         apns: {
-//           payload: {
-//             aps: {
-//               sound: 'mambo.mp3',
-//               badge: 1,
-//             },
-//           },
-//         },
-//       };
-
-//       const response = await this.messaging.send(message);
-//       console.log(`✅ Push notification sent to user ${userId}: ${response}`);
-//     } catch (error) {
-//       console.error(`❌ Error sending push to user ${userId}:`, error);
-//     }
-//   }
-
-//   // 👥 Send notification to all farm members
-//   async sendNotificationToFarmUsers(params: {
-//     farmId: string;
-//     type: string;
-//     title: string;
-//     body: string;
-//     data?: Record<string, any>;
-//     excludeUserId?: string;
-//   }): Promise<void> {
-//     const { farmId, type, title, body, data, excludeUserId } = params;
-
-//     try {
-//       // Get farm data and members
-//       const farmDoc = await this.firestore.collection('farms').doc(farmId).get();
-//       const farmData = farmDoc.data();
-      
-//       if (!farmData) {
-//         console.log(`❌ Farm ${farmId} not found`);
-//         return;
-//       }
-
-//       const members = farmData.members || [];
-//       console.log(`📢 Sending notification to ${members.length} members in farm ${farmId}`);
-      
-//       const batch = this.firestore.batch();
-      
-//       // Save notification to Firestore for each member
-//       for (const memberId of members) {
-//         if (memberId === excludeUserId) continue;
-        
-//         const notificationRef = this.firestore
-//           .collection('farms')
-//           .doc(farmId)
-//           .collection('notifications')
-//           .doc();
-        
-//         batch.set(notificationRef, {
-//           userId: memberId,
-//           type,
-//           title,
-//           body,
-//           data: data || {},
-//           read: false,
-//           timestamp: FieldValue.serverTimestamp(),
-//         });
-
-//         // Send push notification
-//         await this.sendPushNotificationToUser(memberId, title, body, { 
-//           ...data, 
-//           type,
-//           farmId 
-//         });
-//       }
-      
-//       await batch.commit();
-//       console.log(`✅ Notifications sent to all farm members in ${farmId}`);
-
-//     } catch (error) {
-//       console.error('❌ Error sending notifications to farm users:', error);
-//     }
-//   }
-
-//   // 📋 Get notifications for a user
-//   async getNotifications(farmId: string, userId: string, options?: {
-//     limit?: number;
-//     unreadOnly?: boolean;
-//   }): Promise<Array<Record<string, any>>> {
-//     const limit = options?.limit || 50;
-//     const unreadOnly = options?.unreadOnly || false;
-
-//     try {
-//       let query = this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .where('userId', '==', userId)
-//         .orderBy('timestamp', 'desc')
-//         .limit(limit);
-
-//       if (unreadOnly) {
-//         query = query.where('read', '==', false) as FirebaseFirestore.Query;
-//       }
-
-//       const snapshot = await query.get();
-      
-//       return snapshot.docs.map(doc => ({
-//         id: doc.id,
-//         ...doc.data(),
-//         timestamp: doc.data().timestamp?.toDate() || null,
-//       }));
-//     } catch (error) {
-//       console.error('❌ Error getting notifications:', error);
-//       return [];
-//     }
-//   }
-
-//   // ✅ Mark notification as read
-//   async markAsRead(farmId: string, notificationId: string): Promise<void> {
-//     try {
-//       await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .doc(notificationId)
-//         .update({ read: true });
-      
-//       console.log(`✅ Notification ${notificationId} marked as read`);
-//     } catch (error) {
-//       console.error('❌ Error marking notification as read:', error);
-//     }
-//   }
-
-//   // ✅✅ Mark all notifications as read for a user
-//   async markAllAsRead(farmId: string, userId: string): Promise<void> {
-//     try {
-//       const notifications = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .where('userId', '==', userId)
-//         .where('read', '==', false)
-//         .get();
-
-//       const batch = this.firestore.batch();
-//       notifications.docs.forEach(doc => {
-//         batch.update(doc.ref, { read: true });
-//       });
-
-//       await batch.commit();
-//       console.log(`✅ Marked all notifications as read for user ${userId}`);
-//     } catch (error) {
-//       console.error('❌ Error marking all notifications as read:', error);
-//     }
-//   }
-
-//   // 🗑️ Delete notification
-//   async deleteNotification(farmId: string, notificationId: string): Promise<void> {
-//     try {
-//       await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .doc(notificationId)
-//         .delete();
-      
-//       console.log(`🗑️ Notification ${notificationId} deleted`);
-//     } catch (error) {
-//       console.error('❌ Error deleting notification:', error);
-//     }
-//   }
-
-//   // 🗑️🗑️ Clear all notifications for a user
-//   async clearAllNotifications(farmId: string, userId: string): Promise<void> {
-//     try {
-//       const notifications = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .where('userId', '==', userId)
-//         .get();
-
-//       const batch = this.firestore.batch();
-//       notifications.docs.forEach(doc => {
-//         batch.delete(doc.ref);
-//       });
-
-//       await batch.commit();
-//       console.log(`🗑️ Cleared all notifications for user ${userId}`);
-//     } catch (error) {
-//       console.error('❌ Error clearing notifications:', error);
-//     }
-//   }
-
-//   // 🔢 Get unread count
-//   async getUnreadCount(farmId: string, userId: string): Promise<number> {
-//     try {
-//       const snapshot = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .where('userId', '==', userId)
-//         .where('read', '==', false)
-//         .get();
-
-//       return snapshot.size;
-//     } catch (error) {
-//       console.error('❌ Error getting unread count:', error);
-//       return 0;
-//     }
-//   }
-
-//   // ⏰ Check if notification was recently sent (duplicate prevention)
-//   private async wasNotificationRecentlySent(
-//     farmId: string,
-//     type: string,
-//     withinHours: number
-//   ): Promise<boolean> {
-//     try {
-//       const cutoffTime = new Date();
-//       cutoffTime.setHours(cutoffTime.getHours() - withinHours);
-      
-//       const recentNotifications = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('notifications')
-//         .where('type', '==', type)
-//         .where('timestamp', '>', Timestamp.fromDate(cutoffTime))
-//         .limit(1)
-//         .get();
-
-//       return !recentNotifications.empty;
-//     } catch (error) {
-//       console.error('❌ Error checking recent notifications:', error);
-//       return false;
-//     }
-//   }
-
-//   // 🌦️ Weather-based notifications
-//   async checkWeatherNotifications(
-//     farmId: string,
-//     weather: WeatherData,
-//     userId: string
-//   ): Promise<void> {
-//     const current = weather.current;
-    
-//     // Temperature alerts - only once per 6 hours
-//     if (current.tempC > 35) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_heat', 6)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_heat',
-//           title: '🌡️ Hot Weather Alert',
-//           body: `High temperature (${current.tempC.toFixed(1)}°C) detected. Consider extra watering for mango trees.`,
-//           data: {
-//             temperature: current.tempC,
-//             alertType: 'heat',
-//             severity: 'warning',
-//           },
-//         });
-//       }
-//     }
-    
-//     // Cold temperature alert
-//     if (current.tempC < 15) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_cold', 6)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_cold',
-//           title: '🥶 Cold Weather Alert',
-//           body: `Low temperature (${current.tempC.toFixed(1)}°C) may affect mango flowering. Protect young trees.`,
-//           data: {
-//             temperature: current.tempC,
-//             alertType: 'cold',
-//             severity: 'warning',
-//           },
-//         });
-//       }
-//     }
-    
-//     // Rain alerts
-//     if (current.precipMm > 10.0) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_heavy_rain', 3)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_heavy_rain',
-//           title: '🌧️ Heavy Rain Alert',
-//           body: `Heavy rainfall (${current.precipMm}mm) detected. Check drainage systems and skip irrigation.`,
-//           data: {
-//             rainfall: current.precipMm,
-//             alertType: 'heavy_rain',
-//             severity: 'info',
-//           },
-//         });
-//       }
-//     } else if (current.precipMm > 0) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_light_rain', 3)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_light_rain',
-//           title: '🌧️ Rain Detected',
-//           body: `Rainfall (${current.precipMm}mm) detected. Adjust irrigation accordingly.`,
-//           data: {
-//             rainfall: current.precipMm,
-//             alertType: 'light_rain',
-//             severity: 'info',
-//           },
-//         });
-//       }
-//     }
-    
-//     // Humidity alerts
-//     if (current.humidity > 80) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_humidity', 6)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_humidity',
-//           title: '💧 High Humidity Alert',
-//           body: `High humidity (${current.humidity}%) increases risk of fungal diseases. Monitor trees closely.`,
-//           data: {
-//             humidity: current.humidity,
-//             alertType: 'humidity',
-//             severity: 'warning',
-//           },
-//         });
-//       }
-//     }
-    
-//     // Wind alerts
-//     if (current.windKph > 25.0) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_alert_wind', 3)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_alert_wind',
-//           title: '💨 Strong Wind Alert',
-//           body: `Strong winds (${current.windKph} km/h) may cause flower and fruit drop. Secure young trees.`,
-//           data: {
-//             windSpeed: current.windKph,
-//             alertType: 'wind',
-//             severity: 'warning',
-//           },
-//         });
-//       }
-//     }
-    
-//     // Ideal conditions
-//     if (current.tempC >= 20.0 && current.tempC <= 32.0 && 
-//         current.humidity >= 60 && current.humidity <= 80 &&
-//         current.precipMm < 5.0) {
-//       if (!await this.wasNotificationRecentlySent(farmId, 'weather_ideal', 24)) {
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'weather_ideal',
-//           title: '✅ Perfect Mango Weather',
-//           body: `Ideal conditions for mango growth! Temperature: ${current.tempC.toFixed(1)}°C, Humidity: ${current.humidity}%`,
-//           data: {
-//             temperature: current.tempC,
-//             humidity: current.humidity,
-//             alertType: 'ideal_conditions',
-//             severity: 'info',
-//           },
-//         });
-//       }
-//     }
-//   }
-
-//   // 📅 Schedule smart notifications (watering, fertilization, harvest, inspection)
-//   async scheduleSmartNotifications(farmId: string): Promise<void> {
-//     console.log(`⏰ Running smart notifications for farm ${farmId}`);
-    
-//     await this.scheduleWateringReminders(farmId);
-//     await this.scheduleFertilizationReminders(farmId);
-//     await this.scheduleHarvestReminders(farmId);
-//     await this.scheduleInspectionReminders(farmId);
-    
-//     console.log(`✅ Smart notifications completed for farm ${farmId}`);
-//   }
-
-//   private async scheduleWateringReminders(farmId: string): Promise<void> {
-//     try {
-//       const schedules = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('schedules')
-//         .where('type', '==', 'watering')
-//         .where('completed', '==', false)
-//         .get();
-
-//       for (const doc of schedules.docs) {
-//         const data = doc.data();
-//         const scheduledDate = data.scheduledDate?.toDate();
-//         const userId = data.userId || data.createdBy;
-        
-//         if (!scheduledDate || !userId) continue;
-
-//         const now = new Date();
-//         if (scheduledDate > now) {
-//           const differenceMs = scheduledDate.getTime() - now.getTime();
-//           const differenceHours = differenceMs / (1000 * 60 * 60);
-//           const differenceDays = differenceHours / 24;
-          
-//           // 1 day before reminder
-//           if (differenceDays <= 1 && differenceHours <= 24) {
-//             const notifType = `schedule_reminder_${doc.id}_1day`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 12)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '💧 Watering Reminder - Tomorrow',
-//                 body: 'Watering scheduled for tomorrow. Check your tasks.',
-//                 data: {
-//                   scheduleId: doc.id,
-//                   type: 'watering',
-//                   scheduledDate: scheduledDate.toISOString(),
-//                 },
-//               });
-//             }
-//           }
-          
-//           // 2 hours before reminder
-//           if (differenceHours <= 2) {
-//             const notifType = `schedule_reminder_${doc.id}_today`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 6)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '💧 Watering Due Today',
-//                 body: 'Watering is scheduled for today. Don\'t forget!',
-//                 data: {
-//                   scheduleId: doc.id,
-//                   type: 'watering',
-//                   scheduledDate: scheduledDate.toISOString(),
-//                 },
-//               });
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error scheduling watering reminders:', error);
-//     }
-//   }
-
-//   private async scheduleFertilizationReminders(farmId: string): Promise<void> {
-//     try {
-//       const schedules = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('schedules')
-//         .where('type', '==', 'fertilization')
-//         .where('completed', '==', false)
-//         .get();
-
-//       for (const doc of schedules.docs) {
-//         const data = doc.data();
-//         const scheduledDate = data.scheduledDate?.toDate();
-//         const userId = data.userId || data.createdBy;
-        
-//         if (!scheduledDate || !userId) continue;
-
-//         const now = new Date();
-//         if (scheduledDate > now) {
-//           const differenceMs = scheduledDate.getTime() - now.getTime();
-//           const differenceHours = differenceMs / (1000 * 60 * 60);
-//           const differenceDays = differenceHours / 24;
-          
-//           // 1 day before reminder
-//           if (differenceDays <= 1 && differenceHours <= 24) {
-//             const notifType = `fertilization_reminder_${doc.id}`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 12)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '🧪 Fertilization Reminder - Tomorrow',
-//                 body: 'Fertilization scheduled for tomorrow.',
-//                 data: {
-//                   scheduleId: doc.id,
-//                   type: 'fertilization',
-//                   scheduledDate: scheduledDate.toISOString(),
-//                 },
-//               });
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error scheduling fertilization reminders:', error);
-//     }
-//   }
-
-//   private async scheduleHarvestReminders(farmId: string): Promise<void> {
-//     try {
-//       const trees = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('trees')
-//         .where('harvestDate', '>', Timestamp.now())
-//         .get();
-
-//       for (const doc of trees.docs) {
-//         const data = doc.data();
-//         const harvestDate = data.harvestDate?.toDate();
-//         const treeName = data.name || 'Unknown Tree';
-//         const userId = data.userId || data.createdBy;
-        
-//         if (!harvestDate || !userId) continue;
-
-//         const now = new Date();
-//         if (harvestDate > now) {
-//           const differenceMs = harvestDate.getTime() - now.getTime();
-//           const differenceDays = Math.floor(differenceMs / (1000 * 60 * 60 * 24));
-          
-//           // 7 days before harvest
-//           if (differenceDays <= 7 && differenceDays > 0) {
-//             const notifType = `harvest_reminder_${doc.id}_${differenceDays}days`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 24)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '🍎 Harvest Approaching',
-//                 body: `${treeName} is ready for harvest in ${differenceDays} days`,
-//                 data: {
-//                   treeId: doc.id,
-//                   treeName,
-//                   harvestDate: harvestDate.toISOString(),
-//                 },
-//               });
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error scheduling harvest reminders:', error);
-//     }
-//   }
-
-//   private async scheduleInspectionReminders(farmId: string): Promise<void> {
-//     try {
-//       // Check if reminder was sent in last 6 days
-//       if (await this.wasNotificationRecentlySent(farmId, 'inspection_reminder', 6 * 24)) {
-//         return;
-//       }
-      
-//       const lastInspection = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('inspections')
-//         .orderBy('timestamp', 'desc')
-//         .limit(1)
-//         .get();
-
-//       const now = new Date();
-      
-//       if (lastInspection.empty || 
-//           (now.getTime() - lastInspection.docs[0].data().timestamp?.toDate().getTime()) / (1000 * 60 * 60 * 24) >= 7) {
-        
-//         // Get farm members to send notification to
-//         const farmDoc = await this.firestore.collection('farms').doc(farmId).get();
-//         const farmData = farmDoc.data();
-//         const members = farmData?.members || [];
-        
-//         for (const memberId of members) {
-//           await this.saveNotification({
-//             farmId,
-//             userId: memberId,
-//             type: 'inspection_reminder',
-//             title: '🔍 Regular Inspection Due',
-//             body: 'It\'s time for your weekly farm inspection',
-//             data: { reminderType: 'weekly_inspection' },
-//           });
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error scheduling inspection reminders:', error);
-//     }
-//   }
-
-//   // 📓 Journal notifications
-//   async checkForJournalNotifications(farmId: string): Promise<void> {
-//     await this.notifyNewJournalEntries(farmId);
-//     await this.notifyDiseaseAlerts(farmId);
-//     await this.notifyGrowthMilestones(farmId);
-//   }
-
-//   private async notifyNewJournalEntries(farmId: string): Promise<void> {
-//     try {
-//       if (await this.wasNotificationRecentlySent(farmId, 'journal_activity', 20)) {
-//         return;
-//       }
-      
-//       const yesterday = new Date();
-//       yesterday.setDate(yesterday.getDate() - 1);
-      
-//       const newEntries = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('journals')
-//         .where('timestamp', '>', Timestamp.fromDate(yesterday))
-//         .get();
-
-//       if (newEntries.docs.length >= 3) {
-//         const uniqueUserIds = [...new Set(newEntries.docs.map(doc => doc.data().userId))];
-        
-//         for (const userId of uniqueUserIds) {
-//           await this.saveNotification({
-//             farmId,
-//             userId,
-//             type: 'journal_activity',
-//             title: '📝 Active Journaling',
-//             body: `You've added ${newEntries.docs.length} journal entries recently`,
-//             data: { entryCount: newEntries.docs.length },
-//           });
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error notifying new journal entries:', error);
-//     }
-//   }
-
-//   private async notifyDiseaseAlerts(farmId: string): Promise<void> {
-//     try {
-//       if (await this.wasNotificationRecentlySent(farmId, 'disease_alert', 20)) {
-//         return;
-//       }
-      
-//       const twoDaysAgo = new Date();
-//       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-      
-//       const recentJournals = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('journals')
-//         .where('timestamp', '>', Timestamp.fromDate(twoDaysAgo))
-//         .get();
-
-//       let diseaseCount = 0;
-//       for (const doc of recentJournals.docs) {
-//         const data = doc.data();
-//         const healthStatus = (data.healthStatus || '').toLowerCase();
-//         if (healthStatus.includes('disease') || healthStatus.includes('pest')) {
-//           diseaseCount++;
-//         }
-//       }
-
-//       if (diseaseCount >= 2) {
-//         const uniqueUserIds = [...new Set(recentJournals.docs.map(doc => doc.data().userId))];
-        
-//         for (const userId of uniqueUserIds) {
-//           await this.saveNotification({
-//             farmId,
-//             userId,
-//             type: 'disease_alert',
-//             title: '⚠️ Disease Alert',
-//             body: 'Multiple disease reports detected. Check your trees.',
-//             data: { alertCount: diseaseCount },
-//           });
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error notifying disease alerts:', error);
-//     }
-//   }
-
-//   private async notifyGrowthMilestones(farmId: string): Promise<void> {
-//     try {
-//       const trees = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('trees')
-//         .get();
-
-//       for (const doc of trees.docs) {
-//         const data = doc.data();
-//         const plantingDate = data.plantingDate?.toDate();
-//         const treeName = data.name || 'Unknown Tree';
-//         const userId = data.userId || data.createdBy;
-        
-//         if (plantingDate && userId) {
-//           const ageInMonths = Math.floor((new Date().getTime() - plantingDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
-          
-//           // 6 months milestone
-//           if (ageInMonths === 6) {
-//             const notifType = `milestone_${doc.id}_6months`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 30 * 24)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '🎉 Growth Milestone',
-//                 body: `${treeName} is now 6 months old!`,
-//                 data: {
-//                   treeId: doc.id,
-//                   treeName,
-//                   ageInMonths,
-//                 },
-//               });
-//             }
-//           }
-//           // 1 year milestone
-//           else if (ageInMonths === 12) {
-//             const notifType = `milestone_${doc.id}_12months`;
-//             if (!await this.wasNotificationRecentlySent(farmId, notifType, 30 * 24)) {
-//               await this.saveNotification({
-//                 farmId,
-//                 userId,
-//                 type: notifType,
-//                 title: '🎉 Growth Milestone',
-//                 body: `${treeName} is now 1 year old! 🎉`,
-//                 data: {
-//                   treeId: doc.id,
-//                   treeName,
-//                   ageInMonths,
-//                 },
-//               });
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       console.error('❌ Error notifying growth milestones:', error);
-//     }
-//   }
-
-//   // 🚀 Manual notification triggers (for API endpoints)
-//   async notifyScheduleCreated(
-//     farmId: string,
-//     userId: string,
-//     schedule: Record<string, any>
-//   ): Promise<void> {
-//     await this.saveNotification({
-//       farmId,
-//       userId,
-//       type: 'schedule_created',
-//       title: '📅 New Schedule Added',
-//       body: `${schedule.type} scheduled for ${schedule.scheduledDate}`,
-//       data: schedule,
-//     });
-//   }
-
-//   async notifyJournalEntryAdded(
-//     farmId: string,
-//     userId: string,
-//     journal: Record<string, any>
-//   ): Promise<void> {
-//     await this.saveNotification({
-//       farmId,
-//       userId,
-//       type: 'journal_added',
-//       title: '📓 New Journal Entry',
-//       body: `Journal entry added for ${journal.treeName || 'your farm'}`,
-//       data: journal,
-//     });
-//   }
-
-//   async notifyTaskCompleted(
-//     farmId: string,
-//     userId: string,
-//     taskType: string,
-//     details: string
-//   ): Promise<void> {
-//     await this.saveNotification({
-//       farmId,
-//       userId,
-//       type: 'task_completed',
-//       title: '✅ Task Completed',
-//       body: `${taskType} completed: ${details}`,
-//       data: {
-//         taskType,
-//         details,
-//       },
-//     });
-//   }
-
-//   // 🧪 Test methods
-//   async sendTestNotification(farmId: string, userId: string): Promise<void> {
-//     await this.saveNotification({
-//       farmId,
-//       userId,
-//       type: 'test',
-//       title: '🔔 Test Notification',
-//       body: 'This is a real test from your backend!',
-//       data: { test: true, timestamp: new Date().toISOString() },
-//     });
-//   }
-
-//   async testRealScheduleNotifications(farmId: string, userId: string): Promise<void> {
-//     try {
-//       const schedules = await this.firestore
-//         .collection('farms')
-//         .doc(farmId)
-//         .collection('schedules')
-//         .where('completed', '==', false)
-//         .limit(3)
-//         .get();
-
-//       for (const doc of schedules.docs) {
-//         const schedule = doc.data();
-//         await this.saveNotification({
-//           farmId,
-//           userId,
-//           type: 'schedule_reminder',
-//           title: `⏰ ${schedule.title || 'Task'}`,
-//           body: `Due soon: ${schedule.description || 'Check your schedule'}`,
-//           data: {
-//             scheduleId: doc.id,
-//             test: false,
-//           },
-//         });
-//       }
-//       console.log(`✅ Tested ${schedules.docs.length} real schedules`);
-//     } catch (error) {
-//       console.error('❌ Error testing real schedules:', error);
-//     }
-//   }
-
-//   // 🩺 Diagnostic methods
-//   async comprehensiveDiagnostic(userId: string): Promise<Record<string, any>> {
-//     console.log('=== 🔍 NOTIFICATION SERVICE DIAGNOSTIC ===');
-    
-//     const result: Record<string, any> = {
-//       userId,
-//       timestamp: new Date().toISOString(),
-//     };
-
-//     try {
-//       // Check if user exists
-//       const userDoc = await this.firestore.collection('users').doc(userId).get();
-//       result.userExists = userDoc.exists;
-      
-//       if (userDoc.exists) {
-//         const userData = userDoc.data();
-//         result.hasFCMToken = !!userData?.fcmToken;
-//         result.fcmToken = userData?.fcmToken ? '***' + userData.fcmToken.slice(-10) : 'Not found';
-//       }
-
-//       result.status = 'Diagnostic completed';
-//       console.log('✅ Diagnostic completed for user:', userId);
-      
-//     } catch (error) {
-//       console.error('❌ Diagnostic failed:', error);
-//       result.status = 'Failed';
-//       result.error = error instanceof Error ? error.message : 'Unknown error';
-//     }
-
-//     console.log('=== DIAGNOSTIC COMPLETE ===');
-//     return result;
-//   }
-
-//   async debugFCMStatus(userId: string): Promise<Record<string, any>> {
-//     console.log('=== 🔍 FCM DEBUG INFO ===');
-    
-//     const userDoc = await this.firestore.collection('users').doc(userId).get();
-//     const userData = userDoc.data();
-//     const fcmToken = userData?.fcmToken;
-    
-//     const result = {
-//       userId,
-//       hasToken: !!fcmToken,
-//       tokenPreview: fcmToken ? fcmToken.substring(0, 20) + '...' : 'NULL',
-//       timestamp: new Date().toISOString(),
-//     };
-    
-//     console.log('📱 FCM Token exists:', result.hasToken);
-//     console.log('=== DEBUG COMPLETE ===');
-    
-//     return result;
-//   }
-// }
-
-// // Export singleton instance
-// export const notificationService = NotificationService.getInstance();
-// export default notificationService;
+// src/services/notificationService.ts
+import {
+  getMessaging,
+  getToken,
+  onMessage,
+  Messaging,
+  MessagePayload,
+} from 'firebase/messaging';
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
+  writeBatch,
+  onSnapshot,
+  Timestamp,
+  serverTimestamp,
+  Unsubscribe,
+  QuerySnapshot,
+  DocumentData,
+} from 'firebase/firestore';
+import { db, auth } from '@/config/firebase';
+import { WeatherData, AlertType } from '@/types/weather.types';
+
+// Notification types
+export interface NotificationData {
+  userId: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, any>;
+  read: boolean;
+  timestamp: Timestamp;
+}
+
+export interface NotificationAlert {
+  type: AlertType;
+  icon: string;
+  message: string;
+  severity: string;
+  action: string;
+}
+
+class NotificationService {
+  private static instance: NotificationService;
+  private messaging: Messaging | null = null;
+  private initialized = false;
+  private unsubscribeMessage: (() => void) | null = null;
+
+  private constructor() {}
+
+  static getInstance(): NotificationService {
+    if (!NotificationService.instance) {
+      NotificationService.instance = new NotificationService();
+    }
+    return NotificationService.instance;
+  }
+
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+
+    try {
+      console.log('Initializing Web Push Notifications...');
+
+      // Check if browser supports notifications
+      if (!('Notification' in window)) {
+        console.warn('This browser does not support notifications');
+        return;
+      }
+
+      // Initialize Firebase Messaging
+      this.messaging = getMessaging();
+
+      // Request permission
+      await this.requestPermission();
+
+      // Set up foreground message handler
+      this.setupForegroundMessageHandler();
+
+      // Save FCM token
+      await this.saveFCMToken();
+
+      this.initialized = true;
+      console.log('Web Push Notifications initialized successfully');
+    } catch (error) {
+      console.error('Error initializing notifications:', error);
+      this.initialized = false;
+    }
+  }
+
+  private async requestPermission(): Promise<void> {
+    try {
+      const permission = await Notification.requestPermission();
+      console.log('Notification permission:', permission);
+
+      if (permission === 'granted') {
+        console.log('Notification permission granted');
+      } else {
+        console.warn('Notification permission denied');
+      }
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+    }
+  }
+
+  private setupForegroundMessageHandler(): void {
+    if (!this.messaging) return;
+
+    this.unsubscribeMessage = onMessage(this.messaging, (payload) => {
+      console.log('Foreground message received:', payload);
+      this.handleForegroundMessage(payload);
+    });
+  }
+
+  private handleForegroundMessage(payload: MessagePayload): void {
+    const { notification, data } = payload;
+
+    if (notification) {
+      this.showBrowserNotification(
+        notification.title || 'Farm Notification',
+        notification.body || 'New update from your farm',
+        data
+      );
+    }
+  }
+
+  private showBrowserNotification(
+    title: string,
+    body: string,
+    data?: Record<string, any>
+  ): void {
+    if (Notification.permission === 'granted') {
+      const notification = new Notification(title, {
+        body,
+        icon: '/android-chrome-192x192.png',
+        badge: '/favicon-32x32.png',
+        tag: data?.type || 'farm-notification',
+        requireInteraction: false,
+        data,
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+        // Handle notification click navigation if needed
+        if (data?.type) {
+          console.log('Notification clicked:', data);
+        }
+      };
+    }
+  }
+
+  private async saveFCMToken(token?: string): Promise<void> {
+    try {
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        console.log('No user logged in, skipping FCM token save');
+        return;
+      }
+
+      if (!token && this.messaging) {
+        token = await getToken(this.messaging, {
+          vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+        });
+      }
+
+      if (!token) {
+        console.log('Failed to get FCM token');
+        return;
+      }
+
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        fcmToken: token,
+        fcmTokenUpdatedAt: serverTimestamp(),
+      });
+
+      console.log('FCM token saved for user:', userId);
+    } catch (error) {
+      console.error('Error saving FCM token:', error);
+    }
+  }
+
+  // Save notification to Firestore
+  async saveNotification({
+    farmId,
+    type,
+    title,
+    body,
+    data = {},
+  }: {
+    farmId: string;
+    type: string;
+    title: string;
+    body: string;
+    data?: Record<string, any>;
+  }): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
+    try {
+      await addDoc(collection(db, 'farms', farmId, 'notifications'), {
+        userId,
+        type,
+        title,
+        body,
+        data,
+        read: false,
+        timestamp: serverTimestamp(),
+      });
+
+      // Show browser notification immediately
+      this.showBrowserNotification(title, body, { ...data, type });
+    } catch (error) {
+      console.error('Error saving notification:', error);
+    }
+  }
+
+  // Get notifications stream
+  subscribeToNotifications(
+    farmId: string,
+    callback: (notifications: NotificationData[]) => void
+  ): Unsubscribe {
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      return () => {};
+    }
+
+    const q = query(
+      collection(db, 'farms', farmId, 'notifications'),
+      where('userId', '==', userId),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      const notifications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as any[];
+      callback(notifications);
+    });
+  }
+
+  // Mark notification as read
+  async markAsRead(farmId: string, notificationId: string): Promise<void> {
+    try {
+      const notificationRef = doc(
+        db,
+        'farms',
+        farmId,
+        'notifications',
+        notificationId
+      );
+      await updateDoc(notificationRef, { read: true });
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  }
+
+  // Mark all as read
+  async markAllAsRead(farmId: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'notifications'),
+        where('userId', '==', userId),
+        where('read', '==', false)
+      );
+
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+
+      snapshot.docs.forEach((document) => {
+        batch.update(document.ref, { read: true });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
+  }
+
+  // Delete notification
+  async deleteNotification(
+    farmId: string,
+    notificationId: string
+  ): Promise<void> {
+    try {
+      await deleteDoc(
+        doc(db, 'farms', farmId, 'notifications', notificationId)
+      );
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
+  }
+
+  // Clear all notifications
+  async clearAllNotifications(farmId: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'notifications'),
+        where('userId', '==', userId)
+      );
+
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+
+      snapshot.docs.forEach((document) => {
+        batch.delete(document.ref);
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error clearing notifications:', error);
+    }
+  }
+
+  // Get unread count stream
+  subscribeToUnreadCount(
+    farmId: string,
+    callback: (count: number) => void
+  ): Unsubscribe {
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      callback(0);
+      return () => {};
+    }
+
+    const q = query(
+      collection(db, 'farms', farmId, 'notifications'),
+      where('userId', '==', userId),
+      where('read', '==', false)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      callback(snapshot.docs.length);
+    });
+  }
+
+  // Send notification to farm users
+  async sendNotificationToFarmUsers({
+    farmId,
+    type,
+    title,
+    body,
+    data = {},
+    excludeUserId,
+  }: {
+    farmId: string;
+    type: string;
+    title: string;
+    body: string;
+    data?: Record<string, any>;
+    excludeUserId?: string;
+  }): Promise<void> {
+    try {
+      const currentUserId = auth.currentUser?.uid;
+      const farmDoc = await getDocs(
+        query(collection(db, 'farms'), where('__name__', '==', farmId), limit(1))
+      );
+
+      if (farmDoc.empty) return;
+
+      const farmData = farmDoc.docs[0].data();
+      const members = (farmData.members as string[]) || [];
+
+      const batch = writeBatch(db);
+
+      // Save to Firestore for all members
+      members.forEach((memberId) => {
+        if (memberId === excludeUserId) return;
+
+        const notifRef = doc(collection(db, 'farms', farmId, 'notifications'));
+        batch.set(notifRef, {
+          userId: memberId,
+          type,
+          title,
+          body,
+          data,
+          read: false,
+          timestamp: serverTimestamp(),
+        });
+      });
+
+      await batch.commit();
+
+      // Show local notification for current user
+      if (
+        currentUserId &&
+        currentUserId !== excludeUserId &&
+        members.includes(currentUserId)
+      ) {
+        this.showBrowserNotification(title, body, { ...data, type });
+      }
+
+      // Send FCM for other devices/users
+      await this.sendFCMNotification(members, title, body, data, excludeUserId);
+    } catch (error) {
+      console.error('Error sending notification to farm users:', error);
+    }
+  }
+
+  private async sendFCMNotification(
+    userIds: string[],
+    title: string,
+    body: string,
+    data: Record<string, any>,
+    excludeUserId?: string
+  ): Promise<void> {
+    try {
+      for (const userId of userIds) {
+        if (userId === excludeUserId) continue;
+
+        const userDoc = await getDocs(
+          query(collection(db, 'users'), where('__name__', '==', userId), limit(1))
+        );
+
+        if (userDoc.empty) continue;
+
+        const fcmToken = userDoc.docs[0].data().fcmToken as string | undefined;
+
+        if (fcmToken) {
+          await addDoc(collection(db, 'fcmQueue'), {
+            token: fcmToken,
+            title,
+            body,
+            data,
+            timestamp: serverTimestamp(),
+            processed: false,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error sending FCM notification:', error);
+    }
+  }
+
+  // Check if notification was recently sent (prevent duplicates)
+  private async wasNotificationRecentlySent(
+    farmId: string,
+    type: string,
+    within: number // milliseconds
+  ): Promise<boolean> {
+    try {
+      const cutoffTime = Timestamp.fromDate(new Date(Date.now() - within));
+
+      const q = query(
+        collection(db, 'farms', farmId, 'notifications'),
+        where('type', '==', type),
+        where('timestamp', '>', cutoffTime),
+        limit(1)
+      );
+
+      const snapshot = await getDocs(q);
+      return !snapshot.empty;
+    } catch (error) {
+      console.error('Error checking recent notifications:', error);
+      return false;
+    }
+  }
+
+  // Schedule smart notifications
+  async scheduleSmartNotifications(farmId: string): Promise<void> {
+    await Promise.all([
+      this.scheduleWateringReminders(farmId),
+      this.scheduleFertilizationReminders(farmId),
+      this.scheduleHarvestReminders(farmId),
+      this.scheduleInspectionReminders(farmId),
+    ]);
+  }
+
+  private async scheduleWateringReminders(farmId: string): Promise<void> {
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'schedules'),
+        where('type', '==', 'watering'),
+        where('completed', '==', false)
+      );
+
+      const snapshot = await getDocs(q);
+
+      for (const document of snapshot.docs) {
+        const data = document.data();
+        const scheduledDate = (data.scheduledDate as Timestamp).toDate();
+        const now = new Date();
+
+        if (scheduledDate > now) {
+          const difference = scheduledDate.getTime() - now.getTime();
+          const daysDiff = Math.floor(difference / (1000 * 60 * 60 * 24));
+          const hoursDiff = Math.floor(difference / (1000 * 60 * 60));
+
+          if (daysDiff === 1 && hoursDiff <= 24) {
+            const notifType = `schedule_reminder_${document.id}_1day`;
+            if (
+              await this.wasNotificationRecentlySent(
+                farmId,
+                notifType,
+                12 * 60 * 60 * 1000
+              )
+            ) {
+              continue;
+            }
+
+            await this.saveNotification({
+              farmId,
+              type: notifType,
+              title: 'Watering Reminder - Tomorrow',
+              body: 'Watering scheduled for tomorrow. Check your tasks.',
+              data: {
+                scheduleId: document.id,
+                type: 'watering',
+                scheduledDate: scheduledDate.toString(),
+              },
+            });
+          } else if (hoursDiff <= 2) {
+            const notifType = `schedule_reminder_${document.id}_today`;
+            if (
+              await this.wasNotificationRecentlySent(
+                farmId,
+                notifType,
+                6 * 60 * 60 * 1000
+              )
+            ) {
+              continue;
+            }
+
+            await this.saveNotification({
+              farmId,
+              type: notifType,
+              title: 'Watering Due Today',
+              body: "Watering is scheduled for today. Don't forget!",
+              data: {
+                scheduleId: document.id,
+                type: 'watering',
+                scheduledDate: scheduledDate.toString(),
+              },
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error scheduling watering reminders:', error);
+    }
+  }
+
+  private async scheduleFertilizationReminders(farmId: string): Promise<void> {
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'schedules'),
+        where('type', '==', 'fertilization'),
+        where('completed', '==', false)
+      );
+
+      const snapshot = await getDocs(q);
+
+      for (const document of snapshot.docs) {
+        const data = document.data();
+        const scheduledDate = (data.scheduledDate as Timestamp).toDate();
+        const now = new Date();
+
+        if (scheduledDate > now) {
+          const difference = scheduledDate.getTime() - now.getTime();
+          const daysDiff = Math.floor(difference / (1000 * 60 * 60 * 24));
+          const hoursDiff = Math.floor(difference / (1000 * 60 * 60));
+
+          if (daysDiff === 1 && hoursDiff <= 24) {
+            const notifType = `fertilization_reminder_${document.id}`;
+            if (
+              await this.wasNotificationRecentlySent(
+                farmId,
+                notifType,
+                12 * 60 * 60 * 1000
+              )
+            ) {
+              continue;
+            }
+
+            await this.saveNotification({
+              farmId,
+              type: notifType,
+              title: 'Fertilization Reminder - Tomorrow',
+              body: 'Fertilization scheduled for tomorrow.',
+              data: {
+                scheduleId: document.id,
+                type: 'fertilization',
+                scheduledDate: scheduledDate.toString(),
+              },
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error scheduling fertilization reminders:', error);
+    }
+  }
+
+  private async scheduleHarvestReminders(farmId: string): Promise<void> {
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'trees'),
+        where('harvestDate', '>', Timestamp.now())
+      );
+
+      const snapshot = await getDocs(q);
+
+      for (const document of snapshot.docs) {
+        const data = document.data();
+        const harvestDate = (data.harvestDate as Timestamp).toDate();
+        const now = new Date();
+
+        if (harvestDate > now) {
+          const difference = harvestDate.getTime() - now.getTime();
+          const daysDiff = Math.floor(difference / (1000 * 60 * 60 * 24));
+          const treeName = data.name || 'Unknown Tree';
+
+          if (daysDiff <= 7 && daysDiff > 0) {
+            const notifType = `harvest_reminder_${document.id}_${daysDiff}days`;
+            if (
+              await this.wasNotificationRecentlySent(
+                farmId,
+                notifType,
+                24 * 60 * 60 * 1000
+              )
+            ) {
+              continue;
+            }
+
+            await this.saveNotification({
+              farmId,
+              type: notifType,
+              title: 'Harvest Approaching',
+              body: `${treeName} is ready for harvest in ${daysDiff} days`,
+              data: {
+                treeId: document.id,
+                treeName,
+                harvestDate: harvestDate.toString(),
+              },
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error scheduling harvest reminders:', error);
+    }
+  }
+
+  private async scheduleInspectionReminders(farmId: string): Promise<void> {
+    try {
+      // Check if reminder was sent in last 6 days
+      if (
+        await this.wasNotificationRecentlySent(
+          farmId,
+          'inspection_reminder',
+          6 * 24 * 60 * 60 * 1000
+        )
+      ) {
+        return;
+      }
+
+      const q = query(
+        collection(db, 'farms', farmId, 'inspections'),
+        orderBy('timestamp', 'desc'),
+        limit(1)
+      );
+
+      const snapshot = await getDocs(q);
+      const now = new Date();
+
+      if (snapshot.empty) {
+        await this.saveNotification({
+          farmId,
+          type: 'inspection_reminder',
+          title: 'Regular Inspection Due',
+          body: "It's time for your weekly farm inspection",
+          data: { reminderType: 'weekly_inspection' },
+        });
+      } else {
+        const lastInspection = (
+          snapshot.docs[0].data().timestamp as Timestamp
+        ).toDate();
+        const daysSince = Math.floor(
+          (now.getTime() - lastInspection.getTime()) / (1000 * 60 * 60 * 24)
+        );
+
+        if (daysSince >= 7) {
+          await this.saveNotification({
+            farmId,
+            type: 'inspection_reminder',
+            title: 'Regular Inspection Due',
+            body: "It's time for your weekly farm inspection",
+            data: { reminderType: 'weekly_inspection' },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error scheduling inspection reminders:', error);
+    }
+  }
+
+  // Weather-based notifications
+  async checkWeatherNotifications(
+    farmId: string,
+    weather: WeatherData
+  ): Promise<void> {
+    const current = weather.current;
+
+    // Temperature alerts
+    if (current.temp_c > 35) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_alert_heat',
+          6 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_alert_heat',
+          title: '🌡️ Hot Weather Alert',
+          body: `High temperature (${current.temp_c.toFixed(
+            1
+          )}°C) detected. Consider extra watering for mango trees.`,
+          data: {
+            temperature: current.temp_c,
+            alertType: 'heat',
+            severity: 'warning',
+          },
+        });
+      }
+    }
+
+    if (current.temp_c < 15) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_alert_cold',
+          6 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_alert_cold',
+          title: '🥶 Cold Weather Alert',
+          body: `Low temperature (${current.temp_c.toFixed(
+            1
+          )}°C) may affect mango flowering. Protect young trees.`,
+          data: {
+            temperature: current.temp_c,
+            alertType: 'cold',
+            severity: 'warning',
+          },
+        });
+      }
+    }
+
+    // Rain alerts
+    if (current.precip_mm > 10.0) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_alert_heavy_rain',
+          3 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_alert_heavy_rain',
+          title: '🌧️ Heavy Rain Alert',
+          body: `Heavy rainfall (${current.precip_mm}mm) detected. Check drainage systems and skip irrigation.`,
+          data: {
+            rainfall: current.precip_mm,
+            alertType: 'heavy_rain',
+            severity: 'info',
+          },
+        });
+      }
+    }
+
+    // Humidity alerts
+    if (current.humidity > 80) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_alert_humidity',
+          6 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_alert_humidity',
+          title: '💧 High Humidity Alert',
+          body: `High humidity (${current.humidity}%) increases risk of fungal diseases. Monitor trees closely.`,
+          data: {
+            humidity: current.humidity,
+            alertType: 'humidity',
+            severity: 'warning',
+          },
+        });
+      }
+    }
+
+    // Wind alerts
+    if (current.wind_kph > 25.0) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_alert_wind',
+          3 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_alert_wind',
+          title: '💨 Strong Wind Alert',
+          body: `Strong winds (${current.wind_kph} km/h) may cause flower and fruit drop. Secure young trees.`,
+          data: {
+            windSpeed: current.wind_kph,
+            alertType: 'wind',
+            severity: 'warning',
+          },
+        });
+      }
+    }
+
+    // Ideal conditions
+    if (
+      current.temp_c >= 20.0 &&
+      current.temp_c <= 32.0 &&
+      current.humidity >= 60 &&
+      current.humidity <= 80 &&
+      current.precip_mm < 5.0
+    ) {
+      if (
+        !(await this.wasNotificationRecentlySent(
+          farmId,
+          'weather_ideal',
+          24 * 60 * 60 * 1000
+        ))
+      ) {
+        await this.saveNotification({
+          farmId,
+          type: 'weather_ideal',
+          title: '✅ Perfect Mango Weather',
+          body: `Ideal conditions for mango growth! Temperature: ${current.temp_c.toFixed(
+            1
+          )}°C, Humidity: ${current.humidity}%`,
+          data: {
+            temperature: current.temp_c,
+            humidity: current.humidity,
+            alertType: 'ideal_conditions',
+            severity: 'info',
+          },
+        });
+      }
+    }
+  }
+
+  // Manual notification triggers
+  async notifyScheduleCreated(
+    farmId: string,
+    schedule: Record<string, any>
+  ): Promise<void> {
+    await this.saveNotification({
+      farmId,
+      type: 'schedule_created',
+      title: 'New Schedule Added',
+      body: `${schedule.type} scheduled for ${schedule.scheduledDate}`,
+      data: schedule,
+    });
+  }
+
+  async notifyJournalEntryAdded(
+    farmId: string,
+    journal: Record<string, any>
+  ): Promise<void> {
+    await this.saveNotification({
+      farmId,
+      type: 'journal_added',
+      title: 'New Journal Entry',
+      body: `Journal entry added for ${journal.treeName || 'your farm'}`,
+      data: journal,
+    });
+  }
+
+  async notifyTaskCompleted(
+    farmId: string,
+    taskType: string,
+    details: string
+  ): Promise<void> {
+    await this.saveNotification({
+      farmId,
+      type: 'task_completed',
+      title: 'Task Completed',
+      body: `${taskType} completed: ${details}`,
+      data: {
+        taskType,
+        details,
+      },
+    });
+  }
+
+  // Test notification
+  async sendTestNotification(farmId: string): Promise<void> {
+    await this.saveNotification({
+      farmId,
+      type: 'test',
+      title: '🔔 Test Notification',
+      body: 'This is a test notification from your web app!',
+      data: { test: true, timestamp: new Date().toString() },
+    });
+  }
+
+  // Cleanup
+  destroy(): void {
+    if (this.unsubscribeMessage) {
+      this.unsubscribeMessage();
+      this.unsubscribeMessage = null;
+    }
+    this.initialized = false;
+  }
+}
+
+// Export both the class and singleton for flexibility
+export { NotificationService };
+export const notificationService = NotificationService.getInstance();
+export default notificationService;

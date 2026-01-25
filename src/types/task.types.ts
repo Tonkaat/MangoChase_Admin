@@ -9,7 +9,7 @@ export type TaskType =
   | 'harvesting'
   | 'general';
 
-export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
+export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled' | 'completed';
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -43,6 +43,7 @@ export interface TaskStats {
   weeklyTasks: number;
 }
 
+// Weather types
 export interface WeatherData {
   location: string;
   temperature: number;
@@ -88,8 +89,8 @@ export const TASK_TYPE_CONFIG: Record<TaskType, {
   fertilizing: {
     label: 'Fertilizing',
     icon: 'Leaf',
-    color: 'text-secondary',
-    bgColor: 'bg-secondary/10',
+    color: 'text-green-600',
+    bgColor: 'bg-green-100',
   },
   pruning: {
     label: 'Pruning',
@@ -100,14 +101,14 @@ export const TASK_TYPE_CONFIG: Record<TaskType, {
   inspection: {
     label: 'Inspection',
     icon: 'Search',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
+    color: 'text-purple-600',
+    bgColor: 'bg-purple-100',
   },
   pestControl: {
     label: 'Pest Control',
     icon: 'Bug',
-    color: 'text-destructive',
-    bgColor: 'bg-destructive/10',
+    color: 'text-red-600',
+    bgColor: 'bg-red-100',
   },
   harvesting: {
     label: 'Harvesting',
@@ -118,8 +119,8 @@ export const TASK_TYPE_CONFIG: Record<TaskType, {
   general: {
     label: 'General',
     icon: 'ClipboardList',
-    color: 'text-muted-foreground',
-    bgColor: 'bg-muted',
+    color: 'text-gray-600',
+    bgColor: 'bg-gray-100',
   },
 };
 
@@ -130,8 +131,8 @@ export const TASK_PRIORITY_CONFIG: Record<TaskPriority, {
 }> = {
   low: {
     label: 'Low',
-    color: 'text-muted-foreground',
-    bgColor: 'bg-muted',
+    color: 'text-gray-600',
+    bgColor: 'bg-gray-100',
   },
   medium: {
     label: 'Medium',
@@ -145,7 +146,7 @@ export const TASK_PRIORITY_CONFIG: Record<TaskPriority, {
   },
   urgent: {
     label: 'Urgent',
-    color: 'text-destructive',
-    bgColor: 'bg-destructive/10',
+    color: 'text-red-600',
+    bgColor: 'bg-red-100',
   },
 };
