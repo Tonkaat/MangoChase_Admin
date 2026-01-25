@@ -64,8 +64,16 @@ export class TreeService {
 
       // ⚠️ NEW: If treeData is provided, use it directly (setup system) - MATCHING FLUTTER
       if (treeData) {
+        // Create a clean copy without undefined values
+        const cleanTreeData: Record<string, any> = {};
+        for (const [key, value] of Object.entries(treeData)) {
+          if (value !== undefined) {
+            cleanTreeData[key] = value;
+          }
+        }
+        
         dataToSave = {
-          ...treeData,
+          ...cleanTreeData,
           lastInspection: serverTimestamp(),
         };
         
@@ -85,7 +93,7 @@ export class TreeService {
           lastInspection: serverTimestamp(),
           flagged: flagged,
           growthStage: growthStage || 'Unknown',
-          cluster: cluster || 'Default',
+          cluster: cluster || 'Default', // Ensure cluster is never undefined
           createdAt: serverTimestamp(),
         };
       }
@@ -116,19 +124,27 @@ export class TreeService {
 
   async updateTree(farmId: string, treeId: string, updates: Record<string, any>): Promise<void> {
     try {
+      // Clean updates - remove undefined values
+      const cleanUpdates: Record<string, any> = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (value !== undefined) {
+          cleanUpdates[key] = value;
+        }
+      }
+      
       // ⚠️ EXACT SAME UPDATE LOGIC AS FLUTTER
       await updateDoc(
         doc(db, 'farms', farmId, 'trees', treeId),
         {
-          ...updates,
+          ...cleanUpdates,
           lastInspection: serverTimestamp(),
         }
       );
 
       // ⚠️ Same conditional update as Flutter
-      if (updates.healthStatus !== undefined || 
-          updates.flagged !== undefined ||
-          updates.cluster !== undefined) {
+      if (cleanUpdates.healthStatus !== undefined || 
+          cleanUpdates.flagged !== undefined ||
+          cleanUpdates.cluster !== undefined) {
         await this._updateTreeStatistics(farmId);
       }
       

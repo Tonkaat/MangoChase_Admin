@@ -6,9 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BrandLogo } from "@/components/common/BrandLogo";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
 import { Chrome, Loader2 } from "lucide-react";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/config/firebase";
 import { toast } from "sonner";
 
@@ -17,22 +16,26 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { signIn } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    console.log('🔐 Starting email/password sign in...');
 
     try {
-      await signIn(email, password);
+      await signInWithEmailAndPassword(auth, email, password);
+      console.log('✅ Email sign in successful');
       toast.success('Welcome back!');
       
-      // Always navigate to farm-setup
-      // SetupGuard will redirect to dashboard if setup is already complete
+      // Small delay to let auth state propagate
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      console.log('🚀 Navigating to /farm-setup');
       navigate('/farm-setup');
       
     } catch (error: any) {
+      console.error('❌ Email sign in error:', error);
       toast.error(error.message || 'Failed to sign in');
     } finally {
       setLoading(false);
@@ -41,34 +44,23 @@ export default function Login() {
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
+    console.log('🔐 Starting Google sign in...');
     
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      
-      // Create user profile if first time
-      const { uid, displayName, email: userEmail } = result.user;
-      await fetch(`https://firestore.googleapis.com/v1/projects/${import.meta.env.VITE_FIREBASE_PROJECT_ID}/databases/(default)/documents/users/${uid}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            name: { stringValue: displayName || 'User' },
-            email: { stringValue: userEmail || '' },
-            role: { stringValue: 'admin' },
-            createdAt: { timestampValue: new Date().toISOString() },
-            updatedAt: { timestampValue: new Date().toISOString() }
-          }
-        })
-      });
+      console.log('✅ Google sign in successful:', result.user.uid);
 
       toast.success('Signed in with Google!');
       
-      // Always navigate to farm-setup
-      // SetupGuard will redirect to dashboard if setup is already complete
+      // Small delay to let auth state propagate
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      console.log('🚀 Navigating to /farm-setup');
       navigate('/farm-setup');
       
     } catch (error: any) {
+      console.error('❌ Google sign in error:', error);
       toast.error(error.message || 'Google sign-in failed');
     } finally {
       setGoogleLoading(false);

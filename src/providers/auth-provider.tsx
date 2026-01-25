@@ -33,73 +33,54 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
-  useEffect(() => {
-    console.log('🔥 AuthProvider - Setting up onAuthStateChanged listener');
+// src/providers/auth-provider.tsx - Just update the onAuthStateChanged part
+useEffect(() => {
+  console.log('🔥 AuthProvider - Setting up onAuthStateChanged listener');
+  
+  const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
+    console.log('🔥 onAuthStateChanged fired - User:', firebaseUser?.uid || 'NULL');
     
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
-      console.log('🔥 onAuthStateChanged fired - User:', firebaseUser?.uid || 'NULL');
+    if (firebaseUser) {
+      // SIMPLIFIED: Just set the user immediately, don't wait for authService
+      console.log('✅ Setting user immediately');
+      setUser(firebaseUser);
+      setInitialized(true);
+      setLoading(false);
       
-      if (firebaseUser) {
-        try {
-          console.log('👤 User detected, initializing authService...');
-          
-          // Wait for auth service to initialize with timeout
-          if (!authService.initialized) {
-            console.log('⏰ AuthService not initialized, calling initialize()...');
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('AuthService initialization timeout')), 10000)
-            );
-            
-            await Promise.race([
-              authService.initialize(),
-              timeoutPromise
-            ]);
-            
-            console.log('✅ AuthService initialized successfully');
-          }
-          
-          console.log('📊 Setting user state from authService');
-          setUser(authService.user);
+      // Try to load profile data in background (non-blocking)
+      try {
+        if (!authService.initialized) {
+          authService.initialize().catch(err => {
+            console.warn('⚠️ AuthService init failed (non-critical):', err);
+          });
+        }
+        
+        // Update profile data when ready
+        setTimeout(() => {
           setUserProfile(authService.userProfile);
           setFarmId(authService.farmId);
           setFarmData(authService.farmData);
-          setInitialized(authService.initialized);
-          
-          console.log('✅ Auth state updated:', {
-            userId: authService.user?.uid,
-            hasProfile: !!authService.userProfile,
-            farmId: authService.farmId,
-            hasFarmData: !!authService.farmData
-          });
-          
-        } catch (error) {
-          console.error('❌ Error initializing authService:', error);
-          
-          // Fallback: Set user even if authService fails
-          setUser(firebaseUser);
-          setUserProfile(null);
-          setFarmId(null);
-          setFarmData(null);
-          setInitialized(true);
-        }
-      } else {
-        console.log('❌ No user detected, clearing auth state');
-        setUser(null);
-        setUserProfile(null);
-        setFarmId(null);
-        setFarmData(null);
-        setInitialized(true);
+        }, 100);
+        
+      } catch (error) {
+        console.warn('⚠️ Background profile load failed:', error);
       }
-      
-      console.log('🏁 Setting loading = false');
+    } else {
+      console.log('❌ No user, clearing state');
+      setUser(null);
+      setUserProfile(null);
+      setFarmId(null);
+      setFarmData(null);
+      setInitialized(true);
       setLoading(false);
-    });
+    }
+  });
 
-    return () => {
-      console.log('🔥 AuthProvider - Cleaning up listener');
-      unsubscribe();
-    };
-  }, []);
+  return () => {
+    console.log('🔥 AuthProvider - Cleaning up');
+    unsubscribe();
+  };
+}, []);
 
   const signIn = async (email: string, password: string) => {
     console.log('🔐 signIn called');

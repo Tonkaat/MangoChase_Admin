@@ -270,29 +270,29 @@ export function AddTreeModal({
             </div>
 
             {/* Cluster */}
-            <div className="space-y-2">
-              <Label htmlFor="cluster">Cluster (Optional)</Label>
-              <Select
-                value={formData.cluster}
-                onValueChange={(value) => updateField("cluster", value)}
-                disabled={submitting}
-              >
-                <SelectTrigger id="cluster">
-                  <SelectValue placeholder="Select a cluster (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">No Cluster</SelectItem>
-                  {clusters.map((cluster) => (
-                    <SelectItem key={cluster} value={cluster}>
-                      {cluster}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Trees without a cluster will be assigned to "Default"
-              </p>
-            </div>
+<div className="space-y-2">
+  <Label htmlFor="cluster">Cluster (Optional)</Label>
+  <Select
+    value={formData.cluster || "none"} // Use "none" instead of empty string
+    onValueChange={(value) => updateField("cluster", value === "none" ? "" : value)}
+    disabled={submitting}
+  >
+    <SelectTrigger id="cluster">
+      <SelectValue placeholder="Select a cluster (optional)" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="none">No Cluster</SelectItem>
+      {clusters.map((cluster) => (
+        <SelectItem key={cluster} value={cluster}>
+          {cluster}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+  <p className="text-xs text-muted-foreground">
+    Trees without a cluster will be assigned to "Default"
+  </p>
+</div>
 
             {/* Location */}
             <div className="space-y-2">
