@@ -23,17 +23,19 @@ import {
   Trees,
   Users,
   CalendarClock,
+  MessageSquareMore,
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 const nav = [
   { title: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  { title: "Farms", to: "/farms", icon: Leaf },
+  { title: "Farmer's Board", to: "/board", icon: MessageSquareMore },
+  // { title: "Farms", to: "/farms", icon: Leaf },
   { title: "Trees", to: "/trees", icon: Trees },
   { title: "Users", to: "/users", icon: Users },
   { title: "Scheduling", to: "/scheduling", icon: CalendarClock },
   { title: "Analytics", to: "/analytics", icon: BarChart3 },
-  { title: "Knowledge", to: "/knowledge", icon: BookOpen },
+  // { title: "Knowledge", to: "/knowledge", icon: BookOpen },
   { title: "Settings", to: "/settings", icon: Settings },
 ];
 

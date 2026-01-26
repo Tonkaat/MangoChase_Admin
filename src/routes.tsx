@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import TreeManagement from './pages/TreeManagement';
 import FarmManagement from './pages/FarmManagement';
 import UserManagement from './pages/UserManagement';
+import FarmersBoard from "@/pages/FarmersBoard";
 import Scheduling from './pages/Scheduling';
 import Analytics from './pages/Analytics';
 import KnowledgeBase from './pages/KnowledgeBase';
@@ -52,6 +53,10 @@ export const router = createBrowserRouter([
       {
         path: '/dashboard',
         element: <Dashboard />,
+      },
+      {
+        path: '/board',
+        element: <FarmersBoard/>
       },
       {
         path: '/trees',
