@@ -1,4 +1,6 @@
 // src/pages/FarmSetup.tsx
+// FIXED: Preserves admin role during farm setup
+
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -32,6 +34,7 @@ import {
 import { firebaseService } from "@/services/firebase";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { v4 as uuidv4 } from "uuid";
+import { FarmCodeDialog } from "@/components/setup/FarmCodeDialog";
 
 const TOTAL_STEPS = 5;
 
@@ -60,6 +63,10 @@ export default function FarmSetup() {
   const [createdTrees, setCreatedTrees] = useState(0);
   const [currentVariety, setCurrentVariety] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+  
+  // Farm code dialog state
+  const [showFarmCodeDialog, setShowFarmCodeDialog] = useState(false);
+  const [farmCode, setFarmCode] = useState("");
 
   // Check if user has already completed setup
   useEffect(() => {
@@ -301,6 +308,10 @@ export default function FarmSetup() {
       console.log("🚀 Starting farm setup...");
       console.log("📊 Setup data:", data);
 
+      // ✅ FIXED: Get current user profile to preserve role
+      const currentProfile = await firebaseService.getUserProfile();
+      const userRole = currentProfile?.role || 'admin'; // Default to admin if not set
+
       // Create or update farm profile
       const farmId = await firebaseService.createOrUpdateFarmProfile({
         name: data.farmName,
@@ -314,21 +325,27 @@ export default function FarmSetup() {
 
       console.log("✅ Farm created with ID:", farmId);
 
-      // Update user profile with farmId
+      // Get the farm code
+      const generatedFarmCode = await firebaseService.getFarmCode(farmId);
+      if (generatedFarmCode) {
+        setFarmCode(generatedFarmCode);
+      }
+
+      // ✅ FIXED: Update user profile with farmId BUT PRESERVE ROLE
       await firebaseService.upsertUserProfile({
-        name: user.displayName || "Farmer",
+        name: user.displayName || currentProfile?.name || "Admin",
         email: user.email || "",
-        role: "owner",
+        role: userRole, // ✅ Use existing role instead of hardcoding
         farmId: farmId,
         settings: {
           hasCompletedSetup: true,
           notifications: true,
           darkMode: false,
-          businessMode: false,
+          businessMode: userRole === 'admin', // ✅ Enable business mode for admins
         }
       });
 
-      console.log("✅ User profile updated");
+      console.log("✅ User profile updated with role:", userRole);
 
       // Mark farm setup as complete
       await firebaseService.updateFarmProfile(farmId, {
@@ -343,13 +360,14 @@ export default function FarmSetup() {
       await createTrees(farmId, data.varieties, data.ageGroups);
 
       setIsComplete(true);
+      setShowProgress(false); // Hide progress dialog
+      
       toast.success("🎉 Farm setup completed!");
+      
+      // Show farm code dialog
+      setShowFarmCodeDialog(true);
 
-      console.log("✅ Setup complete, navigating to dashboard...");
-
-      // Wait a moment to show completion, then navigate
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      navigate("/dashboard", { replace: true });
+      console.log("✅ Setup complete");
 
     } catch (error: any) {
       console.error("❌ Setup error:", error);
@@ -360,6 +378,12 @@ export default function FarmSetup() {
     }
   };
 
+  // Handler for closing farm code dialog
+  const handleFarmCodeDialogClose = () => {
+    setShowFarmCodeDialog(false);
+    navigate("/dashboard", { replace: true });
+  };
+
   const handleCancelSetup = () => {
     setShowCancelDialog(true);
   };
@@ -368,6 +392,10 @@ export default function FarmSetup() {
     try {
       const user = firebaseService.getCurrentUser();
       if (user) {
+        // ✅ FIXED: Get current user profile to preserve role
+        const currentProfile = await firebaseService.getUserProfile();
+        const userRole = currentProfile?.role || 'admin';
+
         // Create a minimal farm profile if skipping setup
         const farmId = await firebaseService.createOrUpdateFarmProfile({
           name: "My Farm",
@@ -379,17 +407,17 @@ export default function FarmSetup() {
           ownerId: user.uid,
         });
 
-        // Update user profile with minimal setup
+        // ✅ FIXED: Update user profile with minimal setup BUT PRESERVE ROLE
         await firebaseService.upsertUserProfile({
-          name: user.displayName || "Farmer",
+          name: user.displayName || currentProfile?.name || "Admin",
           email: user.email || "",
-          role: "owner",
+          role: userRole, // ✅ Use existing role
           farmId: farmId,
           settings: {
             hasCompletedSetup: false, // Mark as not complete
             notifications: true,
             darkMode: false,
-            businessMode: false,
+            businessMode: userRole === 'admin', // ✅ Enable for admins
           }
         });
       }
@@ -506,6 +534,15 @@ export default function FarmSetup() {
         createdTrees={createdTrees}
         currentVariety={currentVariety}
         isComplete={isComplete}
+      />
+
+      {/* Farm Code Dialog */}
+      <FarmCodeDialog
+        isOpen={showFarmCodeDialog}
+        farmCode={farmCode}
+        farmName={data.farmName}
+        treesCreated={data.numberOfTrees}
+        onClose={handleFarmCodeDialogClose}
       />
 
       {/* Cancel confirmation dialog */}

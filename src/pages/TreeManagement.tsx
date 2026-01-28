@@ -24,7 +24,7 @@ import {
   normalizeHealthStatus,
   normalizeGrowthStage
 } from "@/types/tree.types";
-import { Plus, Download, Upload, RefreshCw, Loader2 } from "lucide-react";
+import { Plus, Download, Upload, RefreshCw, Loader2, Trees } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -501,10 +501,17 @@ export default function TreeManagement() {
       {/* Header */}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-display text-3xl font-bold">Tree Management</h1>
-          <p className="text-muted-foreground">
-            Seb's Basement
-          </p>
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-primary/10 p-2.5">
+              <Trees className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display text-3xl font-bold">Mango Trees</h1>
+              <p className="text-muted-foreground">
+                Seb's basement...
+              </p>
+            </div>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm">

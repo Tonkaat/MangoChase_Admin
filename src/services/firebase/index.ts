@@ -132,6 +132,11 @@ class FirebaseService {
     return this.userService.getCurrentUserFarmId();
   }
 
+
+  async getFarmCode(farmId: string): Promise<string | null> {
+    return this.farmService.getFarmCode(farmId);
+  }
+
   // ==========================================
   // FARM MANAGEMENT METHODS
   // ==========================================

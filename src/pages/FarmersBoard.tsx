@@ -12,6 +12,7 @@ import {
   DollarSign,
   AlertTriangle,
   UserCheck,
+  MessageSquareMore,
 } from 'lucide-react';
 
 export default function FarmersBoard() {
@@ -20,10 +21,17 @@ export default function FarmersBoard() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-3xl font-bold">Farmer's Board</h1>
-        <p className="text-muted-foreground">
-          Manage community content, trade listings, market prices, and farmer verification
-        </p>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-primary/10 p-2.5">
+            <MessageSquareMore className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="font-display text-3xl font-bold">Mango Board</h1>
+            <p className="text-muted-foreground">
+              Seb's favorite place to flex his lo- MANGO trees
+            </p>
+          </div>
+        </div>
       </header>
 
       {/* <BoardStatsCards stats={stats} loading={statsLoading} /> */}

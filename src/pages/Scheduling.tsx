@@ -1,7 +1,7 @@
 // src/pages/Scheduling.tsx
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, isSameDay, addDays } from "date-fns";
-import { Plus, Sparkles, RefreshCw, Filter, Search, Loader2 } from "lucide-react";
+import { Plus, Sparkles, RefreshCw, Filter, Search, Loader2, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -459,9 +459,16 @@ export default function Scheduling() {
     <div className="space-y-6 pb-8">
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Smart Schedule</h1>
-          <p className="text-muted-foreground">Plan and manage your farm tasks efficiently.</p>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-primary/10 p-2.5">
+            <CalendarClock className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="font-display text-3xl font-bold">Mango Schedule</h1>
+            <p className="text-muted-foreground">
+              Seb's Plans for his ehem ehem... Mango Farm
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>

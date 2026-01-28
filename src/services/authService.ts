@@ -250,15 +250,16 @@ class AuthService {
       this.currentUser = await this.firebaseAuth.signUp(email, password);
       
       if (this.currentUser) {
+        // ✅ CHANGED: Create admin account instead of farmer
         await userService.createUserProfile({
           name: name,
           email: email,
-          role: 'farmer',
+          role: 'admin', // Changed from 'farmer' to 'admin'
           farmId: '',
           settings: {
             notifications: true,
             darkMode: false,
-            businessMode: false,
+            businessMode: true, // Enable business mode for admins
             hasCompletedSetup: false,
           },
         });
@@ -315,12 +316,12 @@ class AuthService {
       await userService.upsertUserProfile({
         name: this.currentUser.displayName || this.currentUser.email?.split('@')[0] || 'User',
         email: this.currentUser.email || '',
-        role: 'farmer',
+        role: 'admin', // ✅ CHANGED: Ensure role stays admin during setup
         farmId: farmId,
         settings: {
           notifications: true,
           darkMode: false,
-          businessMode: false,
+          businessMode: true, // Enable business mode for admins
           hasCompletedSetup: true,
         },
         additionalData: {
@@ -402,15 +403,16 @@ class AuthService {
       const profile = await userService.getUserProfile();
       
       if (!profile) {
+        // ✅ CHANGED: Create admin account for Google sign-in users
         await userService.upsertUserProfile({
           name: this.currentUser.displayName || this.currentUser.email?.split('@')[0] || 'User',
           email: this.currentUser.email || '',
-          role: 'farmer',
+          role: 'admin', // Changed from 'farmer' to 'admin'
           farmId: '',
           settings: {
             notifications: true,
             darkMode: false,
-            businessMode: false,
+            businessMode: true, // Enable business mode for admins
             hasCompletedSetup: false,
           },
           additionalData: {

@@ -54,13 +54,31 @@ export class FarmService {
       console.log('✅ Updated farm profile:', farmId);
       return farmId;
     } else {
+      // Generate unique farm code for new farms
+      let farmCode: string;
+      let isUnique = false;
+      
+      do {
+        farmCode = this.generateFarmCode();
+        const existing = await this.getFarmIdByCode(farmCode);
+        isUnique = existing === null;
+      } while (!isUnique);
+
       const farmRef = await addDoc(collection(db, 'farms'), {
         ...farmData,
+        farmCode, // Add farm code
         createdAt: serverTimestamp(),
       });
 
+      // Add owner as first member
+      await setDoc(doc(db, 'farms', farmRef.id, 'members', userId), {
+        userId,
+        role: 'owner',
+        joinedAt: serverTimestamp(),
+      });
+
       await this._initializeFarmStatistics(farmRef.id, numberOfTrees, farmSize, cropType);
-      console.log('✅ Created new farm profile:', farmRef.id);
+      console.log('✅ Created new farm profile:', farmRef.id, 'with code:', farmCode);
       return farmRef.id;
     }
   }
@@ -99,6 +117,48 @@ export class FarmService {
       callback(null);
     });
   }
+
+    // NEW: Generate unique farm code
+  private generateFarmCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  }
+
+  // NEW: Check if farm code exists
+  private async getFarmIdByCode(code: string): Promise<string | null> {
+    try {
+      const q = query(
+        collection(db, 'farms'),
+        where('farmCode', '==', code.toUpperCase()),
+        limit(1)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) return null;
+      return snapshot.docs[0].id;
+    } catch (error) {
+      console.error('Error checking farm code:', error);
+      return null;
+    }
+  }
+
+  // NEW: Get farm code
+  async getFarmCode(farmId: string): Promise<string | null> {
+    try {
+      const farmDoc = await getDoc(doc(db, 'farms', farmId));
+      if (!farmDoc.exists()) return null;
+      return farmDoc.data().farmCode || null;
+    } catch (error) {
+      console.error('Error getting farm code:', error);
+      return null;
+    }
+  }
+
 
   async updateFarmProfile(farmId: string, updates: Record<string, any>): Promise<void> {
     try {
@@ -279,3 +339,7 @@ export class FarmService {
 
 // Export singleton instance
 export const farmService = new FarmService();
+
+function limit(arg0: number): import("@firebase/firestore").QueryConstraint {
+  throw new Error('Function not implemented.');
+}

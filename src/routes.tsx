@@ -16,9 +16,10 @@ import UserManagement from './pages/UserManagement';
 import FarmersBoard from "@/pages/FarmersBoard";
 import Scheduling from './pages/Scheduling';
 import Analytics from './pages/Analytics';
-import KnowledgeBase from './pages/KnowledgeBase';
+import Notification from './pages/Notification';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
+import Journal from './pages/Journal';
 
 export const router = createBrowserRouter([
   {
@@ -79,8 +80,12 @@ export const router = createBrowserRouter([
         element: <Analytics />,
       },
       {
-        path: '/knowledge',
-        element: <KnowledgeBase />,
+        path: '/notifications',
+        element: <Notification />,
+      },
+      {
+        path: '/journal',
+        element: <Journal />,
       },
       {
         path: '/settings',
