@@ -1,4 +1,5 @@
-import { useRef } from "react";
+// src/components/trees/QRCodeModal.tsx
+import { useRef, useState, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,26 +9,101 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tree } from "@/types/tree.types";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Printer, Copy, Check } from "lucide-react";
-import { useState } from "react";
+import {
+  Download,
+  Printer,
+  Copy,
+  Check,
+  Search,
+  FolderTree,
+  TreeDeciduous,
+  CheckSquare,
+  Square,
+  Layers,
+} from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 
 interface QRCodeModalProps {
   trees: Tree[];
+  allTrees?: Tree[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectUrl?: string;
 }
 
+type QRSize = "sm" | "md" | "lg";
+
+const QR_SIZES: Record<QRSize, { px: number; label: string }> = {
+  sm: { px: 80, label: "Small" },
+  md: { px: 120, label: "Medium" },
+  lg: { px: 160, label: "Large" },
+};
+
+const PRINT_LAYOUTS: { value: string; label: string; cols: number }[] = [
+  { value: "2x4", label: "2×4 (8/page)", cols: 2 },
+  { value: "3x3", label: "3×3 (9/page)", cols: 3 },
+  { value: "4x4", label: "4×4 (16/page)", cols: 4 },
+];
+
 export function QRCodeModal({
-  trees,
+  trees: initialTrees,
+  allTrees,
   open,
   onOpenChange,
   projectUrl = window.location.origin,
 }: QRCodeModalProps) {
   const [copied, setCopied] = useState<string | null>(null);
-  const printRef = useRef<HTMLDivElement>(null);
+  const [qrSize, setQrSize] = useState<QRSize>("md");
+  const [printLayout, setPrintLayout] = useState("3x3");
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(initialTrees.map((t) => t.id))
+  );
+  const [tab, setTab] = useState<"preview" | "select">(
+    allTrees && allTrees.length > initialTrees.length ? "select" : "preview"
+  );
+
+  const treesToUse = allTrees ?? initialTrees;
+
+  const filteredTrees = useMemo(() => {
+    if (!search.trim()) return treesToUse;
+    const s = search.toLowerCase();
+    return treesToUse.filter(
+      (t) =>
+        t.id.toLowerCase().includes(s) ||
+        t.type?.toLowerCase().includes(s) ||
+        t.variety?.toLowerCase().includes(s) ||
+        t.cluster?.toLowerCase().includes(s) ||
+        t.tree_name?.toLowerCase().includes(s)
+    );
+  }, [treesToUse, search]);
+
+  // Group by cluster for selection view
+  const groupedByCluster = useMemo(() => {
+    const groups: Record<string, Tree[]> = {};
+    filteredTrees.forEach((tree) => {
+      const key = tree.cluster || "Default";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(tree);
+    });
+    return groups;
+  }, [filteredTrees]);
+
+  const selectedTrees = treesToUse.filter((t) => selectedIds.has(t.id));
 
   const handleCopy = async (tree: Tree) => {
     const qrValue = `${projectUrl}/trees/${tree.farmId}/${tree.id}`;
@@ -36,163 +112,364 @@ export function QRCodeModal({
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const handleDownload = (tree: Tree) => {
-    const svg = document.getElementById(`qr-${tree.id}`);
+  const handleDownloadSingle = (tree: Tree) => {
+    const svg = document.getElementById(`qr-modal-${tree.id}`);
     if (!svg) return;
 
     const svgData = new XMLSerializer().serializeToString(svg);
     const canvas = document.createElement("canvas");
+    const size = QR_SIZES[qrSize].px * 2;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext("2d");
     const img = new Image();
 
     img.onload = () => {
-      canvas.width = 256;
-      canvas.height = 256;
-      ctx?.fillRect(0, 0, canvas.width, canvas.height);
-      ctx?.drawImage(img, 0, 0, 256, 256);
-      
+      ctx!.fillStyle = "#ffffff";
+      ctx!.fillRect(0, 0, size, size);
+      ctx!.drawImage(img, 0, 0, size, size);
       const pngFile = canvas.toDataURL("image/png");
-      const downloadLink = document.createElement("a");
-      downloadLink.download = `tree-${tree.id.slice(0, 8)}-qr.png`;
-      downloadLink.href = pngFile;
-      downloadLink.click();
+      const a = document.createElement("a");
+      a.download = `${tree.tree_name || tree.id.slice(0, 8)}-qr.png`;
+      a.href = pngFile;
+      a.click();
     };
 
     img.src = "data:image/svg+xml;base64," + btoa(svgData);
   };
 
-  const handlePrintAll = () => {
+  const handleDownloadAll = () => {
+    selectedTrees.forEach((tree, i) => {
+      setTimeout(() => handleDownloadSingle(tree), i * 150);
+    });
+  };
+
+  const handlePrint = () => {
+    const layout = PRINT_LAYOUTS.find((l) => l.value === printLayout) ?? PRINT_LAYOUTS[1];
+    const qrPx = QR_SIZES[qrSize].px;
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
-    const qrCodes = trees.map((tree) => {
-      const qrValue = `${projectUrl}/trees/${tree.farmId}/${tree.id}`;
-      return `
-        <div style="page-break-inside: avoid; margin: 20px; text-align: center; display: inline-block;">
-          <div style="border: 2px solid #000; padding: 16px; border-radius: 8px;">
-            <svg id="print-qr-${tree.id}" width="128" height="128"></svg>
-            <div style="margin-top: 8px; font-family: monospace; font-size: 12px;">
-              ${tree.id.slice(0, 8)}
-            </div>
-            <div style="font-size: 10px; color: #666;">
-              ${tree.type}${tree.cluster ? ` • ${tree.cluster}` : ""}
-            </div>
+    const qrItems = selectedTrees
+      .map(
+        (tree) => `
+        <div class="qr-item">
+          <div class="qr-wrapper">
+            <svg id="pqr-${tree.id}" width="${qrPx}" height="${qrPx}"></svg>
           </div>
-        </div>
-      `;
-    }).join("");
+          <div class="tree-name">${tree.tree_name || tree.id.slice(0, 8)}</div>
+          <div class="tree-sub">${tree.type || ""}${tree.variety ? ` · ${tree.variety}` : ""}${tree.cluster ? ` · ${tree.cluster}` : ""}</div>
+        </div>`
+      )
+      .join("");
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Tree QR Codes</title>
-          <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-          <style>
-            body { 
-              font-family: system-ui, sans-serif; 
-              padding: 20px;
-              display: flex;
-              flex-wrap: wrap;
-              justify-content: center;
-            }
-            @media print {
-              body { padding: 0; }
-            }
-          </style>
-        </head>
-        <body>
-          ${qrCodes}
-          <script>
-            ${trees.map((tree) => {
-              const qrValue = `${projectUrl}/trees/${tree.farmId}/${tree.id}`;
-              return `
-                QRCode.toCanvas(document.createElement('canvas'), '${qrValue}', { width: 128 }, function(err, canvas) {
-                  if (err) return;
-                  const container = document.getElementById('print-qr-${tree.id}');
-                  if (container) {
-                    container.replaceWith(canvas);
-                  }
-                });
-              `;
-            }).join("")}
-            setTimeout(() => window.print(), 500);
-          </script>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>QR Codes — ${selectedTrees.length} trees</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; padding: 16px; background: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(${layout.cols}, 1fr); gap: 12px; }
+    .qr-item { border: 1px solid #ddd; border-radius: 8px; padding: 12px; text-align: center; page-break-inside: avoid; }
+    .qr-wrapper { background: #fff; display: inline-block; padding: 4px; border-radius: 4px; }
+    .tree-name { font-family: monospace; font-size: 11px; margin-top: 6px; font-weight: 600; color: #111; }
+    .tree-sub { font-size: 10px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @media print { body { padding: 8px; } @page { margin: 10mm; } }
+  </style>
+</head>
+<body>
+  <div class="grid">${qrItems}</div>
+  <script>
+    const trees = ${JSON.stringify(
+      selectedTrees.map((t) => ({
+        id: t.id,
+        url: `${projectUrl}/trees/${t.farmId}/${t.id}`,
+      }))
+    )};
+    trees.forEach(({ id, url }) => {
+      const el = document.getElementById('pqr-' + id);
+      if (!el) return;
+      const canvas = document.createElement('canvas');
+      el.replaceWith(canvas);
+      new QRCode(canvas, { text: url, width: ${qrPx}, height: ${qrPx}, correctLevel: QRCode.CorrectLevel.H });
+    });
+    setTimeout(() => window.print(), 800);
+  </script>
+</body>
+</html>`);
     printWindow.document.close();
   };
 
+  const toggleTree = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCluster = (cluster: string) => {
+    const clusterIds = groupedByCluster[cluster].map((t) => t.id);
+    const allSelected = clusterIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      clusterIds.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(treesToUse.map((t) => t.id)));
+  const clearAll = () => setSelectedIds(new Set());
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="font-display">
-            QR Codes ({trees.length} {trees.length === 1 ? "tree" : "trees"})
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            QR Code Generator
+            <Badge variant="secondary">{selectedTrees.length} selected</Badge>
           </DialogTitle>
           <DialogDescription>
-            Generate and download QR codes for quick tree identification
+            Generate, download, or print QR codes for quick tree identification.
           </DialogDescription>
         </DialogHeader>
 
-        <div
-          ref={printRef}
-          className="grid gap-4 py-4 sm:grid-cols-2 lg:grid-cols-3"
+        {/* Tabs */}
+        <Tabs
+          value={tab}
+          onValueChange={(v) => setTab(v as "preview" | "select")}
+          className="flex flex-1 flex-col min-h-0"
         >
-          {trees.map((tree) => {
-            const qrValue = `${projectUrl}/trees/${tree.farmId}/${tree.id}`;
-            return (
-              <div
-                key={tree.id}
-                className="flex flex-col items-center rounded-lg border bg-card p-4"
-              >
-                <div className="mb-2 rounded-lg bg-white p-2">
-                  <QRCodeSVG
-                    id={`qr-${tree.id}`}
-                    value={qrValue}
-                    size={100}
-                    level="H"
-                    includeMargin={false}
+          <div className="flex shrink-0 items-center justify-between gap-3">
+            <TabsList>
+              <TabsTrigger value="preview" className="gap-1.5">
+                <TreeDeciduous className="h-3.5 w-3.5" />
+                Preview
+              </TabsTrigger>
+              {allTrees && (
+                <TabsTrigger value="select" className="gap-1.5">
+                  <Layers className="h-3.5 w-3.5" />
+                  Select Trees
+                </TabsTrigger>
+              )}
+            </TabsList>
+
+            {/* QR size picker */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Size:</span>
+              <div className="flex gap-1">
+                {(["sm", "md", "lg"] as QRSize[]).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setQrSize(s)}
+                    className={`rounded px-2 py-0.5 text-xs transition-all ${
+                      qrSize === s
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted-foreground/20"
+                    }`}
+                  >
+                    {QR_SIZES[s].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Preview tab */}
+          <TabsContent value="preview" className="mt-3 flex-1 overflow-y-auto min-h-0">
+            {selectedTrees.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <TreeDeciduous className="mb-3 h-8 w-8 opacity-30" />
+                <p className="text-sm">No trees selected.</p>
+                {allTrees && (
+                  <Button variant="ghost" size="sm" className="mt-2" onClick={() => setTab("select")}>
+                    Select trees
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {selectedTrees.map((tree) => {
+                  const qrValue = `${projectUrl}/trees/${tree.farmId}/${tree.id}`;
+                  const sz = QR_SIZES[qrSize].px;
+                  return (
+                    <div
+                      key={tree.id}
+                      className="flex flex-col items-center rounded-lg border bg-card p-3 transition-all hover:border-primary/40"
+                    >
+                      <div className="mb-2 rounded-lg bg-white p-2">
+                        <QRCodeSVG
+                          id={`qr-modal-${tree.id}`}
+                          value={qrValue}
+                          size={sz}
+                          level="H"
+                          includeMargin={false}
+                        />
+                      </div>
+                      <div className="mb-0.5 font-mono text-[11px] font-semibold text-foreground">
+                        {tree.tree_name || tree.id.slice(0, 8)}
+                      </div>
+                      <div className="mb-2 text-center text-[10px] text-muted-foreground leading-tight">
+                        {tree.type}{tree.variety ? ` · ${tree.variety}` : ""}
+                        {tree.cluster && (
+                          <span className="block text-primary/70">{tree.cluster}</span>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => handleDownloadSingle(tree)}
+                          title="Download PNG"
+                        >
+                          <Download className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => handleCopy(tree)}
+                          title="Copy URL"
+                        >
+                          {copied === tree.id ? (
+                            <Check className="h-3 w-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Selection tab */}
+          {allTrees && (
+            <TabsContent value="select" className="mt-3 flex-1 overflow-y-auto min-h-0 space-y-3">
+              {/* Search + bulk actions */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search trees…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-8 pl-8 text-sm"
                   />
                 </div>
-                <div className="mb-1 font-mono text-xs">{tree.id.slice(0, 8)}</div>
-                <div className="mb-2 text-center text-xs text-muted-foreground">
-                  {tree.type}
-                  {tree.cluster && ` • ${tree.cluster}`}
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => handleDownload(tree)}
-                  >
-                    <Download className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => handleCopy(tree)}
-                  >
-                    {copied === tree.id ? (
-                      <Check className="h-3 w-3 text-brand-leaf" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
+                <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={selectAll}>
+                  All
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={clearAll}>
+                  None
+                </Button>
               </div>
-            );
-          })}
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handlePrintAll}>
-            <Printer className="mr-2 h-4 w-4" /> Print All
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
-        </DialogFooter>
+              {/* Cluster groups */}
+              <div className="space-y-3">
+                {Object.entries(groupedByCluster).map(([cluster, clusterTrees]) => {
+                  const clusterIds = clusterTrees.map((t) => t.id);
+                  const allSel = clusterIds.every((id) => selectedIds.has(id));
+                  const someSel = clusterIds.some((id) => selectedIds.has(id));
+
+                  return (
+                    <div key={cluster} className="rounded-lg border">
+                      {/* Cluster header */}
+                      <div
+                        className="flex cursor-pointer items-center gap-2 rounded-t-lg bg-muted/50 px-3 py-2"
+                        onClick={() => toggleCluster(cluster)}
+                      >
+                        <Checkbox
+                          checked={allSel}
+                          className={someSel && !allSel ? "opacity-60" : ""}
+                          onCheckedChange={() => toggleCluster(cluster)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <FolderTree className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="flex-1 text-sm font-medium">{cluster}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {clusterIds.filter((id) => selectedIds.has(id)).length} / {clusterTrees.length}
+                        </Badge>
+                      </div>
+
+                      {/* Tree list */}
+                      <div className="divide-y">
+                        {clusterTrees.map((tree) => (
+                          <label
+                            key={tree.id}
+                            className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-muted/30"
+                          >
+                            <Checkbox
+                              checked={selectedIds.has(tree.id)}
+                              onCheckedChange={() => toggleTree(tree.id)}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-mono font-medium">
+                                {tree.tree_name || tree.id.slice(0, 8)}
+                              </span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {tree.type}{tree.variety ? ` · ${tree.variety}` : ""}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </TabsContent>
+          )}
+        </Tabs>
+
+        {/* Footer */}
+        <div className="shrink-0 space-y-3 pt-3">
+          <Separator />
+          <div className="flex items-center justify-between gap-3">
+            {/* Print layout picker */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Layout:</span>
+              <Select value={printLayout} onValueChange={setPrintLayout}>
+                <SelectTrigger className="h-8 w-[130px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRINT_LAYOUTS.map((l) => (
+                    <SelectItem key={l.value} value={l.value} className="text-xs">
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadAll}
+                disabled={selectedTrees.length === 0}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                Download All
+              </Button>
+              <Button
+                size="sm"
+                onClick={handlePrint}
+                disabled={selectedTrees.length === 0}
+              >
+                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                Print {selectedTrees.length > 0 ? `(${selectedTrees.length})` : ""}
+              </Button>
+            </div>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

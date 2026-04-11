@@ -56,10 +56,10 @@ export interface FarmStatistics {
 
 export const CROP_TYPES = [
   { value: 'mango', label: 'Mango', icon: '🥭' },
-  { value: 'mixed_fruits', label: 'Mixed Fruits', icon: '🍎' },
-  { value: 'coconut', label: 'Coconut', icon: '🥥' },
-  { value: 'citrus', label: 'Citrus', icon: '🍊' },
-  { value: 'other', label: 'Other', icon: '🌳' },
+  // { value: 'mixed_fruits', label: 'Mixed Fruits', icon: '🍎' },
+  // { value: 'coconut', label: 'Coconut', icon: '🥥' },
+  // { value: 'citrus', label: 'Citrus', icon: '🍊' },
+  // { value: 'other', label: 'Other', icon: '🌳' },
 ] as const;
 
 export const FARMING_TYPES = [

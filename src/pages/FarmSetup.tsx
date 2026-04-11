@@ -484,7 +484,7 @@ export default function FarmSetup() {
   // Show loading while checking setup status
   if (isCheckingSetup) {
     return (
-      <div className="min-h-screen bg-mango-field flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <LoadingSpinner className="w-12 h-12" />
           <p className="mt-4 text-muted-foreground">Checking your account...</p>
@@ -494,7 +494,7 @@ export default function FarmSetup() {
   }
 
   return (
-    <div className="min-h-screen bg-mango-field flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b bg-card/80 backdrop-blur-sm">
         <BrandLogo />

@@ -59,7 +59,7 @@ export function SetupBottomNavigation({
           )}
           
           <Button
-            variant={isLastStep ? "hero" : "mango"}
+            variant={isLastStep ? "default" : "default"}
             onClick={onNext}
             disabled={!canProceed || isLoading}
             className="gap-2 min-w-[100px]"

@@ -26,7 +26,7 @@ export function ReviewStep({ data }: ReviewStepProps) {
     <div className="space-y-6 max-w-2xl mx-auto">
       {/* Header */}
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary mb-2">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-secondary from-primary to-secondary mb-2">
           <Sparkles className="w-8 h-8 text-primary-foreground" />
         </div>
         <h2 className="font-display text-2xl font-bold">Review Your Setup</h2>
