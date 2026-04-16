@@ -1,13 +1,14 @@
-// src/services/firebase/user-service.ts
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
   updateDoc,
   serverTimestamp,
   onSnapshot,
-  DocumentSnapshot
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
 
@@ -16,10 +17,11 @@ export interface UserProfile {
   email: string;
   role: string;
   farmId?: string;
+  assignedClusters?: string[]; // cluster IDs assigned to this user
   settings?: UserSettings;
   createdAt?: any;
   updatedAt?: any;
-  [key: string]: any; // For additionalData
+  [key: string]: any;
 }
 
 export interface UserSettings {
@@ -31,28 +33,26 @@ export interface UserSettings {
 }
 
 export class UserService {
-  
+
   async createUserProfile(options: {
     name: string;
     email: string;
     role: string;
     farmId: string;
+    assignedClusters?: string[];
     settings?: UserSettings;
   }): Promise<void> {
-    const { name, email, role, farmId, settings } = options;
+    const { name, email, role, farmId, assignedClusters, settings } = options;
     const userId = auth.currentUser?.uid;
-    
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
 
-    console.log('📝 UserService.createUserProfile - userId:', userId);
+    if (!userId) throw new Error('No user logged in');
 
     await setDoc(doc(db, 'users', userId), {
       name,
       email,
       role,
       farmId,
+      assignedClusters: assignedClusters || [],
       settings: settings || {
         notifications: true,
         darkMode: false,
@@ -60,8 +60,6 @@ export class UserService {
       },
       createdAt: serverTimestamp(),
     });
-
-    console.log('✅ User profile created for:', userId);
   }
 
   async upsertUserProfile(options: {
@@ -69,35 +67,31 @@ export class UserService {
     email: string;
     role: string;
     farmId?: string;
+    assignedClusters?: string[];
     settings?: UserSettings;
     additionalData?: Record<string, any>;
   }): Promise<void> {
-    const { name, email, role, farmId, settings, additionalData } = options;
-    
+    const { name, email, role, farmId, assignedClusters, settings, additionalData } = options;
+
     let user = auth.currentUser;
     let retries = 3;
-    
-    // ⚠️ EXACT SAME RETRY LOGIC AS FLUTTER!
+
     while (!user && retries > 0) {
-      console.log('⏳ Waiting for auth state... retries left:', retries);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       user = auth.currentUser;
       retries--;
     }
-    
-    if (!user) {
-      console.error('❌ No user after retries, current auth state:', auth.currentUser);
-      throw new Error('No user logged in. Please try signing in again.');
-    }
+
+    if (!user) throw new Error('No user logged in. Please try signing in again.');
 
     const userId = user.uid;
-    console.log('✅ Using user ID:', userId, 'for profile upsert');
 
     const userData: Record<string, any> = {
       name,
       email,
       role,
       farmId: farmId || '',
+      assignedClusters: assignedClusters || [],
       settings: settings || {
         notifications: true,
         darkMode: false,
@@ -112,86 +106,63 @@ export class UserService {
     const userDoc = await getDoc(userRef);
 
     if (!userDoc.exists()) {
-      // Create new document
-      await setDoc(userRef, {
-        ...userData,
-        createdAt: serverTimestamp(),
-      });
-      console.log('✅ Created new user profile for:', userId);
+      await setDoc(userRef, { ...userData, createdAt: serverTimestamp() });
     } else {
-      // Update existing document (merge)
       await setDoc(userRef, userData, { merge: true });
-      console.log('✅ Updated existing user profile for:', userId);
     }
   }
 
   async updateUserProfile(updates: Record<string, any>): Promise<void> {
     const userId = auth.currentUser?.uid;
-    
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
-
+    if (!userId) throw new Error('No user logged in');
     await updateDoc(doc(db, 'users', userId), updates);
-    console.log('✅ User profile updated for:', userId);
   }
 
   async updateUserSettings(settings: UserSettings): Promise<void> {
     const userId = auth.currentUser?.uid;
-    
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
+    if (!userId) throw new Error('No user logged in');
+    await updateDoc(doc(db, 'users', userId), { settings });
+  }
 
+  async updateAssignedClusters(clusterIds: string[]): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error('No user logged in');
     await updateDoc(doc(db, 'users', userId), {
-      settings: settings,
+      assignedClusters: clusterIds,
+      updatedAt: serverTimestamp(),
     });
-    console.log('✅ User settings updated for:', userId);
   }
 
   async getUserProfile(): Promise<Record<string, any> | null> {
     const userId = auth.currentUser?.uid;
-    
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
+    if (!userId) throw new Error('No user logged in');
 
     const userDoc = await getDoc(doc(db, 'users', userId));
-    
-    if (!userDoc.exists()) {
-      return null;
-    }
+    if (!userDoc.exists()) return null;
 
-    return {
-      id: userDoc.id,
-      ...userDoc.data()
-    };
+    return { id: userDoc.id, ...userDoc.data() };
   }
 
-  // ⚠️ EXACT SAME STREAM PATTERN AS FLUTTER!
   getUserProfileStream(callback: (data: Record<string, any> | null) => void): () => void {
     const userId = auth.currentUser?.uid;
-    
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
+    if (!userId) throw new Error('No user logged in');
 
     const userRef = doc(db, 'users', userId);
-    
-    return onSnapshot(userRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = {
-          id: docSnapshot.id,
-          ...docSnapshot.data()
-        };
-        callback(data);
-      } else {
+
+    return onSnapshot(
+      userRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          callback({ id: docSnapshot.id, ...docSnapshot.data() });
+        } else {
+          callback(null);
+        }
+      },
+      (error) => {
+        console.error('Error in user profile stream:', error);
         callback(null);
       }
-    }, (error) => {
-      console.error('Error in user profile stream:', error);
-      callback(null);
-    });
+    );
   }
 
   async getCurrentUserFarmId(): Promise<string | null> {
@@ -204,26 +175,39 @@ export class UserService {
     }
   }
 
-  // Additional helper method (if needed)
+  async getCurrentUserClusters(): Promise<string[]> {
+    try {
+      const userProfile = await this.getUserProfile();
+      return userProfile?.assignedClusters || [];
+    } catch (error) {
+      console.error('Error getting user clusters:', error);
+      return [];
+    }
+  }
+
   async getUserById(userId: string): Promise<Record<string, any> | null> {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
-      
-      if (!userDoc.exists()) {
-        return null;
-      }
-
-      return {
-        id: userDoc.id,
-        ...userDoc.data()
-      };
+      if (!userDoc.exists()) return null;
+      return { id: userDoc.id, ...userDoc.data() };
     } catch (error) {
       console.error('Error getting user by ID:', error);
       return null;
     }
   }
 
-  // Optional: Check if user exists
+  async getUsersByCluster(clusterId: string): Promise<Record<string, any>[]> {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('assignedClusters', 'array-contains', clusterId));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (error) {
+      console.error('Error getting users by cluster:', error);
+      return [];
+    }
+  }
+
   async userExists(userId: string): Promise<boolean> {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
@@ -235,5 +219,4 @@ export class UserService {
   }
 }
 
-// Export singleton instance
 export const userService = new UserService();

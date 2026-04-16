@@ -1,6 +1,6 @@
 // src/services/firebase/task-service.ts
-import { 
-  db, 
+import {
+  db,
   auth,
   serverTimestamp,
   Timestamp,
@@ -9,7 +9,6 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  getDoc,
   getDocs,
   query,
   where,
@@ -18,12 +17,12 @@ import {
   onSnapshot,
   writeBatch,
   QuerySnapshot,
-  Unsubscribe
+  Unsubscribe,
 } from './firebaseConfig';
 
-export class TaskService {
-  
-async addTask(options: {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface AddTaskOptions {
   farmId: string;
   title: string;
   dueDate: Date;
@@ -31,351 +30,462 @@ async addTask(options: {
   status?: string;
   description?: string;
   type?: string;
-  clusterId?: string;
-  clusterName?: string;
-}): Promise<string> {
-  const { farmId, title, dueDate, assignedTo, status = 'pending', description, type, clusterId, clusterName } = options;
-  
-  // Build task data object with only defined values
-  const taskData: Record<string, any> = {
-    title,
-    assignedTo: assignedTo || auth.currentUser?.uid,
-    dueDate: Timestamp.fromDate(dueDate),
-    status,
-    description: description || '',
-    createdAt: serverTimestamp(),
-  };
-
-  // Only add type if it's defined
-  if (type) {
-    taskData.type = type;
-  }
-
-  // Only add clusterId if it's defined and not empty
-  if (clusterId && clusterId.trim() !== '') {
-    taskData.clusterId = clusterId;
-    taskData.clusterName = clusterName || clusterId;
-  }
-  // If clusterId is undefined, null, or empty, don't include it at all
-
-  const taskRef = await addDoc(
-    collection(db, 'farms', farmId, 'tasks'),
-    taskData
-  );
-
-  console.log('✅ Task saved to Firestore:', title, 'type:', type || 'general', 'cluster:', clusterId || 'All Clusters', 'dueDate:', dueDate);
-  return taskRef.id;
+  /**
+   * Pass `null` explicitly to store farm-wide tasks.
+   * Omit or pass `undefined` to also store as null (farm-wide).
+   * Pass a non-empty string for cluster-specific tasks.
+   *
+   * IMPORTANT: We always write `clusterId` to Firestore (never omit the field)
+   * so that `where('clusterId', '==', null)` queries work correctly.
+   */
+  clusterId?: string | null;
+  clusterName?: string | null;
+  notes?: string;
+  priority?: string;
+  isAIGenerated?: boolean;
 }
-  async updateTask(farmId: string, taskId: string, updates: Record<string, any>): Promise<void> {
-    await updateDoc(
-      doc(db, 'farms', farmId, 'tasks', taskId),
-      updates
+
+// ─── TaskService ──────────────────────────────────────────────────────────────
+
+export class TaskService {
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private tasksRef(farmId: string) {
+    return collection(db, 'farms', farmId, 'tasks');
+  }
+
+  private taskDoc(farmId: string, taskId: string) {
+    return doc(db, 'farms', farmId, 'tasks', taskId);
+  }
+
+  /**
+   * Normalise clusterId: empty string → null so Firestore equality queries
+   * (`where('clusterId', '==', null)`) work for farm-wide tasks.
+   */
+  private normaliseClusterId(clusterId?: string | null): string | null {
+    if (!clusterId || clusterId.trim() === '') return null;
+    return clusterId.trim();
+  }
+
+  private buildTaskData(options: Omit<AddTaskOptions, 'farmId'>) {
+    const {
+      title,
+      dueDate,
+      assignedTo,
+      status = 'pending',
+      description = '',
+      type,
+      clusterId,
+      clusterName,
+      notes,
+      priority = 'medium',
+      isAIGenerated = false,
+    } = options;
+
+    const normalisedClusterId = this.normaliseClusterId(clusterId);
+
+    return {
+      title,
+      assignedTo: assignedTo ?? auth.currentUser?.uid ?? null,
+      dueDate: Timestamp.fromDate(dueDate),
+      status,
+      description,
+      priority,
+      isAIGenerated,
+      notes: notes ?? '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      // Always write the field — even as null — so range/equality queries work
+      clusterId: normalisedClusterId,
+      clusterName: normalisedClusterId ? (clusterName ?? normalisedClusterId) : null,
+      ...(type ? { type } : {}),
+    };
+  }
+
+  // ── Single task ─────────────────────────────────────────────────────────────
+
+  async addTask(options: AddTaskOptions): Promise<string> {
+    const { farmId, ...rest } = options;
+    const taskData = this.buildTaskData(rest);
+
+    const taskRef = await addDoc(this.tasksRef(farmId), taskData);
+
+    console.log(
+      '✅ Task saved:',
+      options.title,
+      '| type:', options.type ?? 'general',
+      '| cluster:', options.clusterId || 'All Clusters',
     );
+
+    return taskRef.id;
+  }
+
+  // ── Batch create (one task per cluster) ────────────────────────────────────
+
+  /**
+   * Creates one task per entry in `perClusterOptions` inside a single Firestore
+   * batch write (max 500 ops — well within typical cluster counts).
+   *
+   * Returns the generated task IDs in the same order as the input array.
+   */
+  async addTasksBatch(
+    farmId: string,
+    perClusterOptions: Array<Omit<AddTaskOptions, 'farmId'>>,
+  ): Promise<string[]> {
+    if (perClusterOptions.length === 0) return [];
+
+    // Firestore batch can hold 500 writes max
+    if (perClusterOptions.length > 500) {
+      throw new Error('Cannot create more than 500 tasks in a single batch.');
+    }
+
+    const batch = writeBatch(db);
+    const refs = perClusterOptions.map(() => doc(this.tasksRef(farmId)));
+
+    perClusterOptions.forEach((opts, i) => {
+      batch.set(refs[i], this.buildTaskData(opts));
+    });
+
+    await batch.commit();
+
+    console.log(`✅ Batch created ${perClusterOptions.length} tasks for farm ${farmId}`);
+    return refs.map((r) => r.id);
+  }
+
+  // ── Update / Delete ─────────────────────────────────────────────────────────
+
+  async updateTask(farmId: string, taskId: string, updates: Record<string, any>): Promise<void> {
+    await updateDoc(this.taskDoc(farmId, taskId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
   }
 
   async updateTaskStatus(farmId: string, taskId: string, status: string): Promise<void> {
-    const updates: Record<string, any> = {
+    await this.updateTask(farmId, taskId, {
       status,
-      updatedAt: serverTimestamp(),
-    };
-
-    if (status === 'done') {
-      updates.completedAt = serverTimestamp();
-    }
-
-    await this.updateTask(farmId, taskId, updates);
+      ...(status === 'done' ? { completedAt: serverTimestamp() } : {}),
+    });
   }
 
   async deleteTask(farmId: string, taskId: string): Promise<void> {
-    await deleteDoc(doc(db, 'farms', farmId, 'tasks', taskId));
+    await deleteDoc(this.taskDoc(farmId, taskId));
   }
 
+  // ── Real-time listeners ─────────────────────────────────────────────────────
+
+  /**
+   * Subscribes to ALL tasks for a farm, ordered by dueDate.
+   *
+   * Optimisation note: for large farms, prefer `getTasksByDateRange` for
+   * the calendar view and only pull a rolling window (e.g. ±30 days).
+   */
   getTasks(farmId: string, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    console.log('🔄 Listening for tasks in farm:', farmId);
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      orderBy('dueDate')
+    console.log('🔄 Subscribing to all tasks — farm:', farmId);
+    return onSnapshot(
+      query(this.tasksRef(farmId), orderBy('dueDate')),
+      callback,
     );
-    
+  }
+
+  /**
+   * Subscribes to tasks whose dueDate falls within [start, end].
+   * Use this for the calendar view to avoid loading the full task list.
+   */
+  getTasksInWindow(
+    farmId: string,
+    start: Date,
+    end: Date,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    const q = query(
+      this.tasksRef(farmId),
+      where('dueDate', '>=', Timestamp.fromDate(start)),
+      where('dueDate', '<=', Timestamp.fromDate(end)),
+      orderBy('dueDate'),
+    );
     return onSnapshot(q, callback);
   }
 
-  getTasksByStatus(farmId: string, status: string, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('status', '==', status),
-      orderBy('dueDate')
+  getTasksByStatus(
+    farmId: string,
+    status: string,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
+        where('status', '==', status),
+        orderBy('dueDate'),
+      ),
+      callback,
     );
-    
-    return onSnapshot(q, callback);
   }
 
   getMyTasks(farmId: string, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
     const userId = auth.currentUser?.uid;
-    if (!userId) {
-      throw new Error('No user logged in');
-    }
+    if (!userId) throw new Error('No user logged in');
 
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('assignedTo', '==', userId),
-      orderBy('dueDate')
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
+        where('assignedTo', '==', userId),
+        orderBy('dueDate'),
+      ),
+      callback,
     );
-    
-    return onSnapshot(q, callback);
   }
 
-  getTasksByDate(farmId: string, date: Date, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+  getTasksByDate(
+    farmId: string,
+    date: Date,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
 
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('dueDate', '>=', Timestamp.fromDate(startOfDay)),
-      where('dueDate', '<=', Timestamp.fromDate(endOfDay)),
-      orderBy('dueDate')
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
+        where('dueDate', '>=', Timestamp.fromDate(start)),
+        where('dueDate', '<=', Timestamp.fromDate(end)),
+        orderBy('dueDate'),
+      ),
+      callback,
     );
-    
-    return onSnapshot(q, callback);
   }
 
-  // ==========================================
-  // CLUSTER-SPECIFIC METHODS
-  // ==========================================
+  // ── Cluster-specific listeners ──────────────────────────────────────────────
 
-  getTasksByCluster(farmId: string, clusterId: string, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    console.log('🔄 Listening for tasks in cluster:', clusterId);
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('clusterId', '==', clusterId),
-      orderBy('dueDate')
-    );
-    
-    return onSnapshot(q, callback);
-  }
-
-  getFarmWideTasks(farmId: string, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    console.log('🔄 Listening for farm-wide tasks');
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('clusterId', '==', null),
-      orderBy('dueDate')
-    );
-    
-    return onSnapshot(q, callback);
-  }
-
-  async getRelevantTasksForCluster(farmId: string, clusterId: string): Promise<Record<string, any>[]> {
-    try {
-      // Get cluster-specific tasks
-      const clusterTasksQuery = query(
-        collection(db, 'farms', farmId, 'tasks'),
+  getTasksByCluster(
+    farmId: string,
+    clusterId: string,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
         where('clusterId', '==', clusterId),
-        orderBy('dueDate')
-      );
-      
-      const clusterTasks = await getDocs(clusterTasksQuery);
+        orderBy('dueDate'),
+      ),
+      callback,
+    );
+  }
 
-      // Get farm-wide tasks
-      const farmWideTasksQuery = query(
-        collection(db, 'farms', farmId, 'tasks'),
+  /**
+   * Farm-wide tasks: clusterId is stored as `null` (not missing / undefined).
+   * This works because `buildTaskData` always writes the `clusterId` field.
+   */
+  getFarmWideTasks(
+    farmId: string,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
         where('clusterId', '==', null),
-        orderBy('dueDate')
-      );
-      
-      const farmWideTasks = await getDocs(farmWideTasksQuery);
+        orderBy('dueDate'),
+      ),
+      callback,
+    );
+  }
 
-      // Combine both lists
-      const allTasks = [
-        ...clusterTasks.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-        ...farmWideTasks.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-      ];
+  getClusterTasksByDate(
+    farmId: string,
+    clusterId: string,
+    date: Date,
+    callback: (snapshot: QuerySnapshot) => void,
+  ): Unsubscribe {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
 
-      // Sort by due date
-      allTasks.sort((a, b) => {
-        const aDate = ((a as Record<string, any>).dueDate as Timestamp).toDate();
-        const bDate = ((b as Record<string, any>).dueDate as Timestamp).toDate();
-        return aDate.getTime() - bDate.getTime();
+    return onSnapshot(
+      query(
+        this.tasksRef(farmId),
+        where('clusterId', '==', clusterId),
+        where('dueDate', '>=', Timestamp.fromDate(start)),
+        where('dueDate', '<=', Timestamp.fromDate(end)),
+        orderBy('dueDate'),
+      ),
+      callback,
+    );
+  }
+
+  // ── One-shot fetches ────────────────────────────────────────────────────────
+
+  async getRelevantTasksForCluster(
+    farmId: string,
+    clusterId: string,
+  ): Promise<Record<string, any>[]> {
+    try {
+      const [clusterSnap, farmWideSnap] = await Promise.all([
+        getDocs(
+          query(
+            this.tasksRef(farmId),
+            where('clusterId', '==', clusterId),
+            orderBy('dueDate'),
+          ),
+        ),
+        getDocs(
+          query(
+            this.tasksRef(farmId),
+            where('clusterId', '==', null),
+            orderBy('dueDate'),
+          ),
+        ),
+      ]);
+
+      const all = [
+        ...clusterSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        ...farmWideSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      ].sort((a: any, b: any) => {
+        return (a.dueDate as Timestamp).toDate().getTime() -
+               (b.dueDate as Timestamp).toDate().getTime();
       });
 
-      console.log(`📋 Found ${allTasks.length} tasks for cluster ${clusterId} (${clusterTasks.docs.length} cluster-specific + ${farmWideTasks.docs.length} farm-wide)`);
-      return allTasks;
+      console.log(
+        `📋 ${all.length} tasks for cluster ${clusterId}`,
+        `(${clusterSnap.size} cluster + ${farmWideSnap.size} farm-wide)`,
+      );
+      return all;
     } catch (error) {
-      console.error('❌ Error getting relevant tasks for cluster:', error);
+      console.error('❌ getRelevantTasksForCluster:', error);
       return [];
     }
   }
 
-  getClusterTasksByDate(farmId: string, clusterId: string, date: Date, callback: (snapshot: QuerySnapshot) => void): Unsubscribe {
-    const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
-
-    const q = query(
-      collection(db, 'farms', farmId, 'tasks'),
-      where('clusterId', '==', clusterId),
-      where('dueDate', '>=', Timestamp.fromDate(startOfDay)),
-      where('dueDate', '<=', Timestamp.fromDate(endOfDay)),
-      orderBy('dueDate')
-    );
-    
-    return onSnapshot(q, callback);
-  }
-
-  async getPendingTasksCountForCluster(farmId: string, clusterId: string): Promise<number> {
+  async getPendingTasksCount(farmId: string): Promise<number> {
     try {
-      const q = query(
-        collection(db, 'farms', farmId, 'tasks'),
-        where('clusterId', '==', clusterId),
-        where('status', '==', 'pending')
+      const snap = await getDocs(
+        query(this.tasksRef(farmId), where('status', '==', 'pending')),
       );
-      
-      const snapshot = await getDocs(q);
-      return snapshot.docs.length;
-    } catch (error) {
-      console.error('Error getting pending tasks count for cluster:', error);
+      return snap.size;
+    } catch {
       return 0;
     }
   }
 
-  async updateTaskCluster(farmId: string, taskId: string, newClusterId?: string): Promise<void> {
-    await updateDoc(
-      doc(db, 'farms', farmId, 'tasks', taskId),
-      {
-        clusterId: newClusterId,
-        updatedAt: serverTimestamp(),
-      }
-    );
-    
-    console.log(`✅ Task ${taskId} moved to cluster: ${newClusterId || 'All Clusters'}`);
-  }
-
-  async batchUpdateTasksCluster(farmId: string, taskIds: string[], clusterId?: string): Promise<void> {
-    const batch = writeBatch(db);
-
-    for (const taskId of taskIds) {
-      const taskRef = doc(db, 'farms', farmId, 'tasks', taskId);
-      batch.update(taskRef, {
-        clusterId: clusterId,
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    await batch.commit();
-    console.log(`✅ Batch updated ${taskIds.length} tasks to cluster: ${clusterId || 'All Clusters'}`);
-  }
-
-  // ==========================================
-  // EXISTING METHODS
-  // ==========================================
-
-  async getPendingTasksCount(farmId: string): Promise<number> {
+  async getPendingTasksCountForCluster(farmId: string, clusterId: string): Promise<number> {
     try {
-      const q = query(
-        collection(db, 'farms', farmId, 'tasks'),
-        where('status', '==', 'pending')
+      const snap = await getDocs(
+        query(
+          this.tasksRef(farmId),
+          where('clusterId', '==', clusterId),
+          where('status', '==', 'pending'),
+        ),
       );
-      
-      const snapshot = await getDocs(q);
-      return snapshot.docs.length;
-    } catch (error) {
-      console.error('Error getting pending tasks count:', error);
+      return snap.size;
+    } catch {
       return 0;
     }
   }
 
   async getTodayTasksList(farmId: string): Promise<Record<string, any>[]> {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
     try {
-      const q = query(
-        collection(db, 'farms', farmId, 'tasks'),
-        where('dueDate', '>=', Timestamp.fromDate(startOfDay)),
-        where('dueDate', '<=', Timestamp.fromDate(endOfDay)),
-        orderBy('dueDate')
+      const snap = await getDocs(
+        query(
+          this.tasksRef(farmId),
+          where('dueDate', '>=', Timestamp.fromDate(start)),
+          where('dueDate', '<=', Timestamp.fromDate(end)),
+          orderBy('dueDate'),
+        ),
       );
-      
-      const snapshot = await getDocs(q);
-      console.log('📅 Found', snapshot.docs.length, 'tasks for today');
-      
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     } catch (error) {
-      console.error('❌ Error getting today tasks:', error);
+      console.error('❌ getTodayTasksList:', error);
       return [];
     }
   }
 
-  async getTasksInDateRange(farmId: string, options?: {
-    startDate?: Date;
-    endDate?: Date;
-  }): Promise<Record<string, any>[]> {
+  async getTasksInDateRange(
+    farmId: string,
+    options?: { startDate?: Date; endDate?: Date },
+  ): Promise<Record<string, any>[]> {
     try {
-      const start = options?.startDate || new Date();
+      const start = options?.startDate ?? new Date();
       const startOfDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-      
-      const end = options?.endDate || new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const end = options?.endDate ?? new Date(start.getTime() + 7 * 86_400_000);
       const endOfDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59);
 
-      const q = query(
-        collection(db, 'farms', farmId, 'tasks'),
-        where('dueDate', '>=', Timestamp.fromDate(startOfDay)),
-        where('dueDate', '<=', Timestamp.fromDate(endOfDay)),
-        orderBy('dueDate')
+      const snap = await getDocs(
+        query(
+          this.tasksRef(farmId),
+          where('dueDate', '>=', Timestamp.fromDate(startOfDay)),
+          where('dueDate', '<=', Timestamp.fromDate(endOfDay)),
+          orderBy('dueDate'),
+        ),
       );
-      
-      const snapshot = await getDocs(q);
-      
-      console.log(`📅 Found ${snapshot.docs.length} tasks between ${startOfDay.toISOString().split('T')[0]} and ${endOfDay.toISOString().split('T')[0]}`);
-      
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     } catch (error) {
-      console.error('❌ Error getting tasks in date range:', error);
+      console.error('❌ getTasksInDateRange:', error);
       return [];
     }
   }
 
   async getAllTasks(farmId: string): Promise<Record<string, any>[]> {
     try {
-      const q = query(
-        collection(db, 'farms', farmId, 'tasks'),
-        orderBy('dueDate', 'desc'),
-        limit(100)
+      const snap = await getDocs(
+        query(this.tasksRef(farmId), orderBy('dueDate', 'desc'), limit(100)),
       );
-      
-      const snapshot = await getDocs(q);
-      console.log('📋 Found', snapshot.docs.length, 'total tasks');
-      
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     } catch (error) {
-      console.error('❌ Error getting all tasks:', error);
+      console.error('❌ getAllTasks:', error);
       return [];
     }
   }
 
-  async batchUpdateTasks(farmId: string, taskIds: string[], updates: Record<string, any>): Promise<void> {
+  // ── Cluster management ──────────────────────────────────────────────────────
+
+  async updateTaskCluster(
+    farmId: string,
+    taskId: string,
+    newClusterId?: string | null,
+  ): Promise<void> {
+    const normalised = this.normaliseClusterId(newClusterId);
+    await updateDoc(this.taskDoc(farmId, taskId), {
+      clusterId: normalised,
+      clusterName: normalised ?? null,
+      updatedAt: serverTimestamp(),
+    });
+    console.log(`✅ Task ${taskId} → cluster: ${normalised ?? 'All Clusters'}`);
+  }
+
+  async batchUpdateTasksCluster(
+    farmId: string,
+    taskIds: string[],
+    clusterId?: string | null,
+  ): Promise<void> {
+    const normalised = this.normaliseClusterId(clusterId);
     const batch = writeBatch(db);
 
-    for (const taskId of taskIds) {
-      const taskRef = doc(db, 'farms', farmId, 'tasks', taskId);
-      batch.update(taskRef, {
-        ...updates,
+    taskIds.forEach((id) => {
+      batch.update(this.taskDoc(farmId, id), {
+        clusterId: normalised,
+        clusterName: normalised ?? null,
         updatedAt: serverTimestamp(),
       });
-    }
+    });
 
+    await batch.commit();
+    console.log(`✅ Batch updated ${taskIds.length} tasks → cluster: ${normalised ?? 'All Clusters'}`);
+  }
+
+  async batchUpdateTasks(
+    farmId: string,
+    taskIds: string[],
+    updates: Record<string, any>,
+  ): Promise<void> {
+    const batch = writeBatch(db);
+    taskIds.forEach((id) => {
+      batch.update(this.taskDoc(farmId, id), { ...updates, updatedAt: serverTimestamp() });
+    });
     await batch.commit();
   }
 }
 
-// Export singleton instance
+// Singleton
 export const taskService = new TaskService();

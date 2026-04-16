@@ -8,19 +8,17 @@ import { AddEditUserDialog } from '@/components/users/AddEditUserDialog';
 import { UserActivityLog } from '@/components/users/UserActivityLog';
 import { SuspendUserDialog } from '@/components/users/SuspendUserDialog';
 import type { UserAccount } from '@/types/user.types';
-import { Users, Activity, Shield } from 'lucide-react';
+import { Users, Activity, Shield, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
-// Import farmer verification components from board
 import { FarmerVerificationTab } from '@/components/board/FarmerVerificationTab';
 
 export default function UserManagement() {
   const {
     users,
     activities,
-    farms,
+    clusters,
     loading,
-    addUser,
     updateUser,
     deleteUser,
     suspendUser,
@@ -30,7 +28,6 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
 
   const handleView = (user: UserAccount) => {
@@ -43,25 +40,17 @@ export default function UserManagement() {
     setEditDialogOpen(true);
   };
 
-  const handleAdd = () => {
-    setSelectedUser(null);
-    setAddDialogOpen(true);
-  };
-
   const handleSave = async (userData: Partial<UserAccount>) => {
     if (userData.id) {
       await updateUser(userData.id, userData);
       toast.success('User updated successfully');
-    } else {
-      await addUser(userData);
-      toast.success('User created successfully');
     }
   };
 
   const handleDelete = async (user: UserAccount) => {
-    if (confirm(`Are you sure you want to delete ${user.name}?`)) {
+    if (confirm(`Are you sure you want to remove ${user.name}? This will deactivate their account.`)) {
       await deleteUser(user.id);
-      toast.success('User deleted successfully');
+      toast.success(`${user.name}'s account deactivated`);
     }
   };
 
@@ -84,35 +73,48 @@ export default function UserManagement() {
 
   return (
     <div className="space-y-6">
+      {/* Page header */}
       <header>
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-primary/10 p-2.5">
-            <Users className="h-6 w-6 text-primary" />
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-primary/10 p-2.5">
+              <Users className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-tight">User Management</h1>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Manage farm users, roles, and cluster assignments
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="font-display text-3xl font-bold">Mango Users</h1>
-            <p className="text-muted-foreground">
-              Seb the discord mod and his lolicon army
-            </p>
-          </div>
+        </div>
+
+        {/* Join code hint banner */}
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            New farmers join using their invite code in the mobile app — no manual user creation needed.
+          </span>
         </div>
       </header>
 
+      {/* Stats overview */}
       <UserStatsCards users={users} loading={loading} />
 
+      {/* Tabs */}
       <Tabs defaultValue="accounts" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:flex sm:gap-1">
-          <TabsTrigger value="accounts" className="gap-2">
-            <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">Accounts</span>
+        <TabsList className="h-9 gap-1 p-1">
+          <TabsTrigger value="accounts" className="h-7 gap-1.5 px-3 text-xs">
+            <Users className="h-3.5 w-3.5" />
+            Accounts
           </TabsTrigger>
-          <TabsTrigger value="verification" className="gap-2">
-            <Shield className="h-4 w-4" />
-            <span className="hidden sm:inline">Verification</span>
+          <TabsTrigger value="verification" className="h-7 gap-1.5 px-3 text-xs">
+            <Shield className="h-3.5 w-3.5" />
+            Verification
           </TabsTrigger>
-          <TabsTrigger value="activity" className="gap-2">
-            <Activity className="h-4 w-4" />
-            <span className="hidden sm:inline">Activity</span>
+          <TabsTrigger value="activity" className="h-7 gap-1.5 px-3 text-xs">
+            <Activity className="h-3.5 w-3.5" />
+            Activity
           </TabsTrigger>
         </TabsList>
 
@@ -125,7 +127,6 @@ export default function UserManagement() {
             onDelete={handleDelete}
             onSuspend={handleSuspend}
             onReactivate={handleReactivate}
-            onAdd={handleAdd}
           />
         </TabsContent>
 
@@ -143,7 +144,7 @@ export default function UserManagement() {
         user={selectedUser}
         open={viewDialogOpen}
         onOpenChange={setViewDialogOpen}
-        farms={farms}
+        clusters={clusters}
       />
 
       <AddEditUserDialog
@@ -151,17 +152,8 @@ export default function UserManagement() {
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         onSave={handleSave}
-        farms={farms}
+        clusters={clusters}
         mode="edit"
-      />
-
-      <AddEditUserDialog
-        user={null}
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onSave={handleSave}
-        farms={farms}
-        mode="add"
       />
 
       <SuspendUserDialog

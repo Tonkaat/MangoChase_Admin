@@ -18,14 +18,23 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { Layers, X } from 'lucide-react';
 import type { UserAccount, UserRole } from '@/types/user.types';
+
+interface Cluster {
+  id: string;
+  name: string;
+  treeCount?: number;
+  farmerName?: string; // farmer currently assigned to this cluster
+}
 
 interface AddEditUserDialogProps {
   user: UserAccount | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (user: Partial<UserAccount>) => void;
-  farms: { id: string; name: string }[];
+  clusters: Cluster[];
   mode: 'add' | 'edit';
 }
 
@@ -34,14 +43,14 @@ export function AddEditUserDialog({
   open,
   onOpenChange,
   onSave,
-  farms,
+  clusters,
   mode,
 }: AddEditUserDialogProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('farmer');
-  const [selectedFarms, setSelectedFarms] = useState<string[]>([]);
+  const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
 
   useEffect(() => {
     if (user && mode === 'edit') {
@@ -49,122 +58,203 @@ export function AddEditUserDialog({
       setEmail(user.email || '');
       setPhone(user.phone || '');
       setRole(user.role || 'farmer');
-      setSelectedFarms(user.assignedFarms || []);
+      setSelectedClusters(user.assignedClusters || []);
     } else {
       setName('');
       setEmail('');
       setPhone('');
       setRole('farmer');
-      setSelectedFarms([]);
+      setSelectedClusters([]);
     }
   }, [user, mode, open]);
 
   const handleSubmit = () => {
-    if (!name.trim() || !email.trim()) {
-      return;
-    }
-    
+    if (!name.trim() || !email.trim()) return;
     onSave({
       id: user?.id,
       name: name.trim(),
       email: email.trim(),
       phone: phone.trim() || undefined,
       role,
-      assignedFarms: selectedFarms,
+      assignedClusters: selectedClusters,
     });
     onOpenChange(false);
   };
 
-  const toggleFarm = (farmId: string) => {
-    setSelectedFarms((prev) =>
-      prev.includes(farmId) ? prev.filter((f) => f !== farmId) : [...prev, farmId]
+  const toggleCluster = (clusterId: string) => {
+    setSelectedClusters((prev) =>
+      prev.includes(clusterId)
+        ? prev.filter((c) => c !== clusterId)
+        : [...prev, clusterId]
     );
+  };
+
+  const removeCluster = (clusterId: string) => {
+    setSelectedClusters((prev) => prev.filter((c) => c !== clusterId));
   };
 
   const isFormValid = name.trim() && email.trim();
 
+  const selectedClusterObjects = clusters.filter((c) => selectedClusters.includes(c.id));
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{mode === 'add' ? 'Add New User' : 'Edit User'}</DialogTitle>
           <DialogDescription>
             {mode === 'add'
-              ? 'Create a new user account and assign farms'
-              : 'Update user information and farm assignments'}
+              ? 'Create a user account and assign clusters'
+              : 'Update user information and cluster assignments'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Full Name *</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter full name"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="name" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Full Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Juan dela Cruz"
+                className="h-9"
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="email" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Email <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="juan@example.com"
+                className="h-9"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="phone" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Phone
+              </Label>
+              <Input
+                id="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+63 9XX XXX XXXX"
+                className="h-9"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Role
+              </Label>
+              <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Administrator</SelectItem>
+                  <SelectItem value="manager">Farm Manager</SelectItem>
+                  <SelectItem value="farmer">Farmer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
+          {/* Cluster assignment */}
           <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter email address"
-            />
-          </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Assign Clusters
+              </Label>
+              {selectedClusters.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {selectedClusters.length} selected
+                </span>
+              )}
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="phone">Phone (optional)</Label>
-            <Input
-              id="phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+63 XXX XXX XXXX"
-            />
-          </div>
+            {/* Selected cluster chips */}
+            {selectedClusterObjects.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedClusterObjects.map((cluster) => (
+                  <Badge
+                    key={cluster.id}
+                    variant="secondary"
+                    className="gap-1 pr-1 text-xs"
+                  >
+                    <Layers className="h-3 w-3" />
+                    {cluster.name}
+                    <button
+                      onClick={() => removeCluster(cluster.id)}
+                      className="ml-0.5 rounded hover:text-destructive"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
 
-          <div className="space-y-2">
-            <Label>Role</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">Administrator</SelectItem>
-                <SelectItem value="manager">Farm Manager</SelectItem>
-                <SelectItem value="farmer">Farmer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Assign Farms</Label>
-            <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border p-3">
-              {farms.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No farms available</p>
+            <div className="max-h-44 overflow-y-auto rounded-lg border">
+              {clusters.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <Layers className="mb-2 h-6 w-6 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">No clusters available</p>
+                </div>
               ) : (
-                farms.map((farm) => (
-                  <div key={farm.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={farm.id}
-                      checked={selectedFarms.includes(farm.id)}
-                      onCheckedChange={() => toggleFarm(farm.id)}
-                    />
-                    <label htmlFor={farm.id} className="text-sm">
-                      {farm.name || 'Unnamed Farm'}
-                    </label>
-                  </div>
-                ))
+                <div className="divide-y">
+                  {clusters.map((cluster) => {
+                    const isSelected = selectedClusters.includes(cluster.id);
+                    const hasOtherFarmer =
+                      cluster.farmerName &&
+                      (!user || cluster.farmerName !== user.name);
+
+                    return (
+                      <label
+                        key={cluster.id}
+                        htmlFor={`cluster-${cluster.id}`}
+                        className={`flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50 ${
+                          isSelected ? 'bg-primary/5' : ''
+                        }`}
+                      >
+                        <Checkbox
+                          id={`cluster-${cluster.id}`}
+                          checked={isSelected}
+                          onCheckedChange={() => toggleCluster(cluster.id)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{cluster.name}</span>
+                            {cluster.treeCount !== undefined && (
+                              <span className="text-xs text-muted-foreground">
+                                {cluster.treeCount} trees
+                              </span>
+                            )}
+                          </div>
+                          {hasOtherFarmer && (
+                            <p className="text-xs text-amber-600">
+                              Currently: {cluster.farmerName}
+                            </p>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

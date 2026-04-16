@@ -11,6 +11,7 @@ export interface UserAccount {
   status: 'active' | 'inactive' | 'suspended';
   avatarUrl?: string;
   assignedFarms: string[];
+  assignedClusters?: string[]; 
   verificationTier?: 'basic' | 'verified' | 'trusted';
   verificationStatus?: 'pending' | 'approved' | 'rejected' | 'suspended';
   verificationNotes?: string;

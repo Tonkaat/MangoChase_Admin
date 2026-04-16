@@ -13,10 +13,13 @@ import {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
   writeBatch,
   setDoc
 } from './firebaseConfig';
+
+import type { Cluster } from '@/components/scheduling/AddTaskDialog';
 
 export class FarmService {
   
@@ -54,7 +57,6 @@ export class FarmService {
       console.log('✅ Updated farm profile:', farmId);
       return farmId;
     } else {
-      // Generate unique farm code for new farms
       let farmCode: string;
       let isUnique = false;
       
@@ -66,11 +68,10 @@ export class FarmService {
 
       const farmRef = await addDoc(collection(db, 'farms'), {
         ...farmData,
-        farmCode, // Add farm code
+        farmCode,
         createdAt: serverTimestamp(),
       });
 
-      // Add owner as first member
       await setDoc(doc(db, 'farms', farmRef.id, 'members', userId), {
         userId,
         role: 'owner',
@@ -118,9 +119,77 @@ export class FarmService {
     });
   }
 
-    // NEW: Generate unique farm code
+  // ─── Clusters ──────────────────────────────────────────────────────────────
+
+  /**
+   * Fetches all clusters for a farm from `farms/{farmId}/clusters`.
+   *
+   * Each cluster document is expected to have:
+   *   - name: string
+   *   - assignedFarmerId?: string   (UID of the farmer)
+   *   - assignedFarmerName?: string (display name for the UI)
+   *
+   * Returns an array shaped to the `Cluster` type used by AddTaskDialog.
+   */
+  async getClusters(farmId: string): Promise<Cluster[]> {
+    try {
+      const snapshot = await getDocs(collection(db, 'farms', farmId, 'clusters'));
+      const clusters: Cluster[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name ?? d.id,
+          assignedFarmerId: data.assignedFarmerId ?? undefined,
+          assignedFarmerName: data.assignedFarmerName ?? undefined,
+        };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+
+      console.log(`📦 getClusters — farm: ${farmId} — found: ${clusters.length}`, clusters.map(c => c.name));
+      return clusters;
+    } catch (error) {
+      console.error('❌ Error getting clusters:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Real-time stream of clusters. Returns an unsubscribe function.
+   * Use this if your cluster list can change while the scheduling page is open.
+   */
+  getClustersStream(
+    farmId: string,
+    callback: (clusters: Cluster[]) => void,
+  ): () => void {
+    console.log(`🔄 getClustersStream — subscribing to farms/${farmId}/clusters`);
+    return onSnapshot(
+      collection(db, 'farms', farmId, 'clusters'),
+      (snapshot) => {
+        console.log(`📦 getClustersStream — farm: ${farmId} — size: ${snapshot.size}`);
+        const clusters: Cluster[] = snapshot.docs
+          .map((d) => {
+            const data = d.data();
+            console.log('  cluster doc:', d.id, data);
+            return {
+              id: d.id,
+              name: data.name ?? d.id,
+              assignedFarmerId: data.assignedFarmerId ?? undefined,
+              assignedFarmerName: data.assignedFarmerName ?? undefined,
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+        callback(clusters);
+      },
+      (error) => {
+        console.error('❌ getClustersStream error:', error);
+        callback([]);
+      },
+    );
+  }
+
+  // ─── Farm code helpers ─────────────────────────────────────────────────────
+
   private generateFarmCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -128,17 +197,15 @@ export class FarmService {
     return code;
   }
 
-  // NEW: Check if farm code exists
   private async getFarmIdByCode(code: string): Promise<string | null> {
     try {
       const q = query(
         collection(db, 'farms'),
         where('farmCode', '==', code.toUpperCase()),
-        limit(1)
+        limit(1),
       );
       
       const snapshot = await getDocs(q);
-      
       if (snapshot.empty) return null;
       return snapshot.docs[0].id;
     } catch (error) {
@@ -147,7 +214,6 @@ export class FarmService {
     }
   }
 
-  // NEW: Get farm code
   async getFarmCode(farmId: string): Promise<string | null> {
     try {
       const farmDoc = await getDoc(doc(db, 'farms', farmId));
@@ -159,6 +225,7 @@ export class FarmService {
     }
   }
 
+  // ─── Profile updates ───────────────────────────────────────────────────────
 
   async updateFarmProfile(farmId: string, updates: Record<string, any>): Promise<void> {
     try {
@@ -177,9 +244,7 @@ export class FarmService {
     try {
       const docSnap = await getDoc(doc(db, 'farms', farmId));
       if (!docSnap.exists()) return false;
-      
-      const data = docSnap.data();
-      return data.setupCompleted === true;
+      return docSnap.data().setupCompleted === true;
     } catch (error) {
       console.error('Error checking farm setup:', error);
       return false;
@@ -188,30 +253,26 @@ export class FarmService {
 
   async getUserFarms(userId: string): Promise<Record<string, any>[]> {
     try {
-      const q = query(
-        collection(db, 'farms'),
-        where('ownerId', '==', userId)
+      const snapshot = await getDocs(
+        query(collection(db, 'farms'), where('ownerId', '==', userId)),
       );
-      
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({
-        farmId: doc.id,
-        ...doc.data()
-      }));
+      return snapshot.docs.map((d) => ({ farmId: d.id, ...d.data() }));
     } catch (error) {
       console.error('Error getting user farms:', error);
       return [];
     }
   }
 
+  // ─── Statistics ────────────────────────────────────────────────────────────
+
   async getFarmStatisticsWithSetup(farmId: string): Promise<Record<string, any>> {
     try {
       const farmProfile = await this.getFarmProfile(farmId);
       const statsDoc = await getDoc(doc(db, 'farms', farmId, 'statistics', 'stats'));
 
-      const stats = statsDoc.exists() 
-          ? statsDoc.data() 
-          : await this._calculateStatistics(farmId);
+      const stats = statsDoc.exists()
+        ? statsDoc.data()
+        : await this._calculateStatistics(farmId);
 
       return {
         farmName: farmProfile?.name || 'Unknown Farm',
@@ -224,31 +285,20 @@ export class FarmService {
       };
     } catch (error) {
       console.error('Error getting farm statistics with setup:', error);
-      return {
-        totalTrees: 0,
-        healthyTrees: 0,
-        flaggedTrees: 0,
-        avgYield: 0,
-      };
+      return { totalTrees: 0, healthyTrees: 0, flaggedTrees: 0, avgYield: 0 };
     }
   }
 
   async deleteFarm(farmId: string): Promise<void> {
     try {
       const batch = writeBatch(db);
-      const collections = ['trees', 'journal', 'tasks', 'scans', 'statistics'];
+      const collections = ['trees', 'journal', 'tasks', 'scans', 'statistics', 'clusters'];
       
-      // Delete all subcollections
-      for (const collectionName of collections) {
-        const q = query(collection(db, 'farms', farmId, collectionName));
-        const snapshot = await getDocs(q);
-        
-        snapshot.docs.forEach(document => {
-          batch.delete(document.ref);
-        });
+      for (const col of collections) {
+        const snapshot = await getDocs(query(collection(db, 'farms', farmId, col)));
+        snapshot.docs.forEach((d) => batch.delete(d.ref));
       }
 
-      // Delete the farm document
       batch.delete(doc(db, 'farms', farmId));
       await batch.commit();
       console.log('✅ Deleted farm and all data:', farmId);
@@ -258,35 +308,37 @@ export class FarmService {
     }
   }
 
-  private async _initializeFarmStatistics(farmId: string, numberOfTrees: number, farmSize: number, cropType: string): Promise<void> {
-    const statsData = {
+  private async _initializeFarmStatistics(
+    farmId: string,
+    numberOfTrees: number,
+    farmSize: number,
+    cropType: string,
+  ): Promise<void> {
+    await setDoc(doc(db, 'farms', farmId, 'statistics', 'stats'), {
       totalTrees: numberOfTrees,
       healthyTrees: 0,
       flaggedTrees: 0,
       avgYield: 0,
-      farmSize: farmSize,
-      cropType: cropType,
+      farmSize,
+      cropType,
       updatedAt: serverTimestamp(),
-    };
-
-    await setDoc(doc(db, 'farms', farmId, 'statistics', 'stats'), statsData);
+    });
   }
 
   private async _calculateStatistics(farmId: string): Promise<Record<string, any>> {
     const snapshot = await getDocs(collection(db, 'farms', farmId, 'trees'));
     
-    let totalTrees = snapshot.docs.length;
     let healthyTrees = 0;
     let flaggedTrees = 0;
 
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
+    snapshot.docs.forEach((d) => {
+      const data = d.data();
       if (data.healthStatus === 'Healthy') healthyTrees++;
       if (data.flagged === true) flaggedTrees++;
     });
 
     const stats = {
-      totalTrees,
+      totalTrees: snapshot.size,
       healthyTrees,
       flaggedTrees,
       avgYield: 0,
@@ -297,7 +349,8 @@ export class FarmService {
     return stats;
   }
 
-  // Backward compatibility
+  // ─── Backward compatibility aliases ───────────────────────────────────────
+
   async createFarm(options: { name: string; location: string }): Promise<string> {
     return this.createOrUpdateFarmProfile({
       name: options.name,
@@ -319,27 +372,24 @@ export class FarmService {
 
   async getStatistics(farmId: string): Promise<Record<string, any>> {
     const statsDoc = await getDoc(doc(db, 'farms', farmId, 'statistics', 'stats'));
-
-    if (!statsDoc.exists()) {
-      return this._calculateStatistics(farmId);
-    }
-
+    if (!statsDoc.exists()) return this._calculateStatistics(farmId);
     return statsDoc.data() || {};
   }
 
-  getStatisticsStream(farmId: string, callback: (data: Record<string, any> | null) => void): () => void {
-    return onSnapshot(doc(db, 'farms', farmId, 'statistics', 'stats'), (docSnap) => {
-      callback(docSnap.exists() ? docSnap.data() : null);
-    }, (error) => {
-      console.error('Error in statistics stream:', error);
-      callback(null);
-    });
+  getStatisticsStream(
+    farmId: string,
+    callback: (data: Record<string, any> | null) => void,
+  ): () => void {
+    return onSnapshot(
+      doc(db, 'farms', farmId, 'statistics', 'stats'),
+      (docSnap) => callback(docSnap.exists() ? docSnap.data() : null),
+      (error) => {
+        console.error('Error in statistics stream:', error);
+        callback(null);
+      },
+    );
   }
 }
 
 // Export singleton instance
 export const farmService = new FarmService();
-
-function limit(arg0: number): import("@firebase/firestore").QueryConstraint {
-  throw new Error('Function not implemented.');
-}

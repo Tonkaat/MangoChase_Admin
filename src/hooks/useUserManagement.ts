@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
+import {
+  collection,
+  query,
+  onSnapshot,
   doc,
   setDoc,
   updateDoc,
@@ -11,37 +11,42 @@ import {
   getDocs,
   Timestamp,
   where,
-  arrayUnion,
-  arrayRemove
+  orderBy,
 } from 'firebase/firestore';
 import { firebaseService } from '@/services/firebase';
 import type { UserAccount, UserActivity, UserRole } from '@/types/user.types';
 
 const db = firebaseService.firestore;
 
+export interface Cluster {
+  id: string;
+  name: string;
+  treeCount?: number;
+  farmerName?: string; // farmer currently assigned
+  farmId?: string;
+}
+
 export function useUserManagement() {
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [activities, setActivities] = useState<UserActivity[]>([]);
-  const [farms, setFarms] = useState<{ id: string; name: string }[]>([]);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentFarmId, setCurrentFarmId] = useState<string | null>(null);
 
-  // Get the current logged-in user's farm
+  // Load current user's farm
   useEffect(() => {
     const loadCurrentUserFarm = async () => {
       try {
         const farmId = await firebaseService.getCurrentUserFarmId();
-        console.log('Current user farm ID:', farmId);
         setCurrentFarmId(farmId);
       } catch (error) {
         console.error('Error loading current user farm:', error);
       }
     };
-
     loadCurrentUserFarm();
   }, []);
 
-  // Load users assigned to the current farm
+  // Load users for the current farm
   useEffect(() => {
     if (!currentFarmId) {
       setLoading(false);
@@ -49,98 +54,88 @@ export function useUserManagement() {
     }
 
     const usersRef = collection(db, 'users');
-    
-    // Query users where assignedFarms contains currentFarmId OR farmId equals currentFarmId
-    const q = query(
-      usersRef,
-      where('assignedFarms', 'array-contains', currentFarmId)
-    );
-    
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const userList: UserAccount[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        
-        return {
-          id: doc.id,
-          email: data.email || '',
-          name: data.name || '',
-          phone: data.phone || undefined,
-          role: (data.role as UserRole) || 'farmer',
-          status: data.status || 'active',
-          assignedFarms: data.assignedFarms || (data.farmId ? [data.farmId] : []),
-          verificationTier: data.verificationTier || (data.role === 'farmer' ? 'basic' : undefined),
-          verificationStatus: data.verificationStatus || (data.role === 'farmer' ? 'pending' : undefined),
-          avatarUrl: data.avatarUrl || undefined,
-          verificationNotes: data.verificationNotes || undefined,
-          verifiedAt: data.verifiedAt ? (data.verifiedAt as Timestamp).toDate() : undefined,
-          verifiedBy: data.verifiedBy || undefined,
-          suspendedAt: data.suspendedAt ? (data.suspendedAt as Timestamp).toDate() : undefined,
-          suspendedReason: data.suspendedReason || undefined,
-          lastLoginAt: data.lastLoginAt ? (data.lastLoginAt as Timestamp).toDate() : undefined,
-          lastActivityAt: data.lastActivityAt ? (data.lastActivityAt as Timestamp).toDate() : undefined,
-          createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
-          updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
-        };
-      });
 
-      // Also get users with old farmId field matching current farm
-      const legacyUsersQuery = query(
-        usersRef,
-        where('farmId', '==', currentFarmId)
-      );
-      const legacySnapshot = await getDocs(legacyUsersQuery);
-      
-      legacySnapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        // Only add if not already in the list
-        if (!userList.find(u => u.id === doc.id)) {
-          userList.push({
-            id: doc.id,
-            email: data.email || '',
-            name: data.name || '',
-            phone: data.phone || undefined,
-            role: (data.role as UserRole) || 'farmer',
-            status: data.status || 'active',
-            assignedFarms: data.assignedFarms || (data.farmId ? [data.farmId] : []),
-            verificationTier: data.verificationTier || (data.role === 'farmer' ? 'basic' : undefined),
-            verificationStatus: data.verificationStatus || (data.role === 'farmer' ? 'pending' : undefined),
-            avatarUrl: data.avatarUrl || undefined,
-            verificationNotes: data.verificationNotes || undefined,
-            verifiedAt: data.verifiedAt ? (data.verifiedAt as Timestamp).toDate() : undefined,
-            verifiedBy: data.verifiedBy || undefined,
-            suspendedAt: data.suspendedAt ? (data.suspendedAt as Timestamp).toDate() : undefined,
-            suspendedReason: data.suspendedReason || undefined,
-            lastLoginAt: data.lastLoginAt ? (data.lastLoginAt as Timestamp).toDate() : undefined,
-            lastActivityAt: data.lastActivityAt ? (data.lastActivityAt as Timestamp).toDate() : undefined,
-            createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
-            updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
+    // Primary query: users with assignedClusters pointing to farm's clusters
+    // We also support legacy farmId field
+    const q = query(usersRef, where('farmId', '==', currentFarmId));
+
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        const userList: UserAccount[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return mapDocToUser(docSnap.id, data);
+        });
+
+        // Also fetch users assigned via assignedClusters within this farm
+        const clusterIds = clusters.map((c) => c.id);
+        if (clusterIds.length > 0) {
+          // Firestore 'array-contains-any' supports up to 30 values
+          const clusterQuery = query(
+            usersRef,
+            where('assignedClusters', 'array-contains-any', clusterIds.slice(0, 30))
+          );
+          const clusterSnapshot = await getDocs(clusterQuery);
+          clusterSnapshot.docs.forEach((docSnap) => {
+            if (!userList.find((u) => u.id === docSnap.id)) {
+              userList.push(mapDocToUser(docSnap.id, docSnap.data()));
+            }
           });
         }
-      });
-      
-      setUsers(userList);
-      setLoading(false);
-    }, (error) => {
-      console.error('Error fetching users:', error);
-      setLoading(false);
-    });
+
+        setUsers(userList);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching users:', error);
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
-  }, [currentFarmId]);
+  }, [currentFarmId, clusters]);
 
-  // Load only the current farm
+  // Load clusters from farms/{farmId}/clusters subcollection
   useEffect(() => {
     if (!currentFarmId) return;
 
-    const farmRef = doc(db, 'farms', currentFarmId);
-    
-    const unsubscribe = onSnapshot(farmRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        setFarms([{
-          id: docSnapshot.id,
-          name: docSnapshot.data().name || 'Current Farm',
-        }]);
-      }
+    // ✅ Correct path — matches treeService.getClusters()
+    const clustersRef = collection(db, 'farms', currentFarmId, 'clusters');
+    const q = query(clustersRef, orderBy('name'));
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const clusterList: Cluster[] = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data();
+
+          // Resolve farmer name assigned to this cluster
+          let farmerName: string | undefined;
+          try {
+            const farmerQuery = query(
+              collection(db, 'users'),
+              where('assignedClusters', 'array-contains', docSnap.id),
+              where('role', '==', 'farmer')
+            );
+            const farmerSnap = await getDocs(farmerQuery);
+            if (!farmerSnap.empty) {
+              farmerName = farmerSnap.docs[0].data().name;
+            }
+          } catch (_) {
+            // non-critical
+          }
+
+          return {
+            id: docSnap.id,
+            // clusters use doc.id as the name (e.g. "Block A")
+            name: data.name || docSnap.id,
+            treeCount: data.treeCount ?? undefined,
+            farmId: currentFarmId,
+            farmerName,
+          };
+        })
+      );
+
+      setClusters(clusterList);
     });
 
     return () => unsubscribe();
@@ -155,148 +150,107 @@ export function useUserManagement() {
         const activityRef = collection(db, 'userActivities');
         const q = query(activityRef, where('farmId', '==', currentFarmId));
         const snapshot = await getDocs(q);
-        
-        const activityList: UserActivity[] = snapshot.docs.map((doc) => {
-          const data = doc.data();
+
+        const activityList: UserActivity[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
+            id: docSnap.id,
             userId: data.userId || '',
             userName: data.userName || '',
             action: data.action || 'view',
             resource: data.resource || '',
-            resourceId: data.resourceId || undefined,
-            details: data.details || undefined,
-            ipAddress: data.ipAddress || undefined,
-            userAgent: data.userAgent || undefined,
-            timestamp: data.timestamp ? (data.timestamp as Timestamp).toDate() : new Date(),
+            resourceId: data.resourceId ?? undefined,
+            details: data.details ?? undefined,
+            ipAddress: data.ipAddress ?? undefined,
+            userAgent: data.userAgent ?? undefined,
+            timestamp: data.timestamp
+              ? (data.timestamp as Timestamp).toDate()
+              : new Date(),
           };
         });
-        
+
         setActivities(activityList);
-      } catch (error) {
-        console.log('No activities yet for this farm');
+      } catch (_) {
+        // no activities yet
       }
     };
 
     loadActivities();
   }, [currentFarmId]);
 
-  // Add a new user to the current farm
+  // CRUD operations
+
   const addUser = async (userData: Partial<UserAccount>) => {
-    if (!currentFarmId) {
-      throw new Error('No current farm selected');
-    }
+    if (!currentFarmId) throw new Error('No current farm selected');
 
-    try {
-      const userRef = doc(collection(db, 'users'));
-      
-      await setDoc(userRef, {
-        email: userData.email,
-        name: userData.name,
-        phone: userData.phone || null,
-        role: userData.role || 'farmer',
-        status: 'active',
-        // Assign to current farm
-        assignedFarms: [currentFarmId],
-        farmId: currentFarmId, // Keep for backwards compatibility
-        verificationTier: userData.role === 'farmer' ? 'basic' : undefined,
-        verificationStatus: userData.role === 'farmer' ? 'pending' : undefined,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        settings: {
-          notifications: true,
-          darkMode: false,
-          businessMode: false,
-          hasCompletedSetup: false,
-        }
-      });
-
-      return userRef.id;
-    } catch (error) {
-      console.error('Error adding user:', error);
-      throw error;
-    }
+    const userRef = doc(collection(db, 'users'));
+    await setDoc(userRef, {
+      email: userData.email,
+      name: userData.name,
+      phone: userData.phone || null,
+      role: userData.role || 'farmer',
+      status: 'active',
+      farmId: currentFarmId,
+      assignedClusters: userData.assignedClusters || [],
+      verificationTier: userData.role === 'farmer' ? 'basic' : null,
+      verificationStatus: userData.role === 'farmer' ? 'pending' : null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      settings: {
+        notifications: true,
+        darkMode: false,
+        businessMode: false,
+        hasCompletedSetup: false,
+      },
+    });
+    return userRef.id;
   };
 
-  // Update existing user
   const updateUser = async (userId: string, updates: Partial<UserAccount>) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      
-      const updateData: any = {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      };
+    const userRef = doc(db, 'users', userId);
+    const updateData: Record<string, any> = {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    };
 
-      // If updating assignedFarms, also update farmId for backwards compatibility
-      if (updates.assignedFarms && updates.assignedFarms.length > 0) {
-        updateData.farmId = updates.assignedFarms[0];
-      }
+    // Remove undefined values
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) delete updateData[key];
+    });
 
-      // Remove undefined values
-      Object.keys(updateData).forEach(key => {
-        if (updateData[key] === undefined) {
-          delete updateData[key];
-        }
-      });
-
-      await updateDoc(userRef, updateData);
-    } catch (error) {
-      console.error('Error updating user:', error);
-      throw error;
-    }
+    await updateDoc(userRef, updateData);
   };
 
-  // Delete user (soft delete)
+  // Soft delete
   const deleteUser = async (userId: string) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        status: 'inactive',
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      throw error;
-    }
+    await updateDoc(doc(db, 'users', userId), {
+      status: 'inactive',
+      updatedAt: serverTimestamp(),
+    });
   };
 
-  // Suspend user
   const suspendUser = async (userId: string, reason: string) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        status: 'suspended',
-        suspendedAt: serverTimestamp(),
-        suspendedReason: reason,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error('Error suspending user:', error);
-      throw error;
-    }
+    await updateDoc(doc(db, 'users', userId), {
+      status: 'suspended',
+      suspendedAt: serverTimestamp(),
+      suspendedReason: reason,
+      updatedAt: serverTimestamp(),
+    });
   };
 
-  // Reactivate user
   const reactivateUser = async (userId: string) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        status: 'active',
-        suspendedAt: null,
-        suspendedReason: null,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error('Error reactivating user:', error);
-      throw error;
-    }
+    await updateDoc(doc(db, 'users', userId), {
+      status: 'active',
+      suspendedAt: null,
+      suspendedReason: null,
+      updatedAt: serverTimestamp(),
+    });
   };
 
   return {
     users,
     activities,
-    farms,
+    clusters,
     loading,
     currentFarmId,
     addUser,
@@ -304,5 +258,32 @@ export function useUserManagement() {
     deleteUser,
     suspendUser,
     reactivateUser,
+  };
+}
+
+// Helper to map Firestore doc → UserAccount
+function mapDocToUser(id: string, data: Record<string, any>): UserAccount {
+  return {
+    id,
+    email: data.email || '',
+    name: data.name || '',
+    phone: data.phone ?? undefined,
+    role: (data.role as UserRole) || 'farmer',
+    status: data.status || 'active',
+    assignedClusters: data.assignedClusters || [],
+    // legacy support
+    assignedFarms: data.assignedFarms || (data.farmId ? [data.farmId] : []),
+    verificationTier: data.verificationTier ?? (data.role === 'farmer' ? 'basic' : undefined),
+    verificationStatus: data.verificationStatus ?? (data.role === 'farmer' ? 'pending' : undefined),
+    avatarUrl: data.avatarUrl ?? undefined,
+    verificationNotes: data.verificationNotes ?? undefined,
+    verifiedAt: data.verifiedAt ? (data.verifiedAt as Timestamp).toDate() : undefined,
+    verifiedBy: data.verifiedBy ?? undefined,
+    suspendedAt: data.suspendedAt ? (data.suspendedAt as Timestamp).toDate() : undefined,
+    suspendedReason: data.suspendedReason ?? undefined,
+    lastLoginAt: data.lastLoginAt ? (data.lastLoginAt as Timestamp).toDate() : undefined,
+    lastActivityAt: data.lastActivityAt ? (data.lastActivityAt as Timestamp).toDate() : undefined,
+    createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
+    updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
   };
 }
