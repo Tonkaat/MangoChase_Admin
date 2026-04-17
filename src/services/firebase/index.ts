@@ -26,6 +26,7 @@ import { ScanService } from './scanService';
 import { AIChatService } from './aiChatService';
 import { QueryService } from './queryService';
 import { TreeNamingService } from './treeNamingService';
+import { HarvestRecord } from '@/types/tree.types';
 
 // Types matching your Flutter code
 export interface User {
@@ -338,6 +339,13 @@ class FirebaseService {
     return this.treeNamingService.generateTreeName(options);
   }
 
+  async recomputeAllClusterStats(farmId: string): Promise<void> {
+    return this.treeService.recomputeAllClusterStats(farmId);
+  }
+
+  async recordHarvest(farmId: string, harvest: Omit<HarvestRecord, 'id' | 'createdAt'>): Promise<string> {
+    return this.treeService.recordHarvest(farmId, harvest);
+  }
   // ==========================================
   // TASK MANAGEMENT METHODS
   // ==========================================

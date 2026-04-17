@@ -5,49 +5,95 @@ export type GrowthStage = 'seedling' | 'juvenile' | 'mature' | 'flowering' | 'fr
 
 export interface Tree {
   // ⚠️ MUST MATCH FLUTTER DATABASE FIELDS
-  id: string;                    // Firestore document ID
-  tree_id: string;               // UUID for QR codes (from TreeNamingService)
-  tree_name: string;             // Human-readable name (e.g., "Tree_carabao_0001")
-  farmId: string;                // Parent farm ID
-  
+  id: string;
+  tree_id: string;
+  tree_name: string;
+  farmId: string;
+
   // Tree properties
-  type: string;                  // e.g., "Mango", "Avocado"
-  variety: string;               // e.g., "Carabao", "Pico", "Indian" (normalized)
-  healthStatus: HealthStatus;    // Health status (case-sensitive: "Healthy", "Warning", etc.)
-  growthStage: GrowthStage;      // Growth stage
-  cluster: string;               // Cluster name (e.g., "North Field", "Default")
-  flagged: boolean;              // Flagged for attention
-  
+  type: string;
+  variety: string;
+  healthStatus: HealthStatus;
+  growthStage: GrowthStage;
+  cluster: string;
+  flagged: boolean;
+
   // Additional details
   notes?: string;
-  location?: string;             // GPS coordinates or location description
-  plantedDate?: Date;            // When the tree was planted
-  lastInspection?: Date;         // Last inspection date (matching Flutter's 'lastInspection')
-  
+  location?: string;
+  plantedDate?: Date;
+  lastInspection?: Date;
+
+  // ── NEW: Agronomic fields for yield prediction ──
+  age?: number;            // years (computed from plantedDate or set manually)
+  height?: number;         // meters
+  canopySpread?: number;   // meters
+  lastYield?: number;      // kg from most recent harvest
+  missedSprayings?: number; // count in last 90 days (synced from task system)
+
   // Metadata
   createdAt: Date;
   updatedAt: Date;
-  
-  // Optional fields from Firestore
-  lastInspectionDate?: Date;     // Alias for lastInspection (for compatibility)
+  lastInspectionDate?: Date;
+}
+
+// ── NEW: Cluster document shape (now includes pre-aggregated stats) ──
+export interface ClusterStats {
+  treeCount: number;
+  healthyCount: number;
+  warningCount: number;
+  criticalCount: number;
+  avgAge: number;
+  avgHeight: number;
+  avgCanopySpread: number;
+  avgLastYield: number;        // kg/tree average across cluster
+  totalMissedSprayings: number;
+  varieties: string[];         // distinct varieties in this cluster
+  lastUpdated: Date;
 }
 
 export interface Cluster {
-  id: string;                    // Firestore document ID (same as name)
-  farmId: string;                // Parent farm ID
-  name: string;                  // Cluster name (e.g., "North Field")
+  id: string;
+  farmId: string;
+  name: string;
   description?: string;
   location?: string;
-  
-  // Statistics (can be calculated)
-  treeCount: number;             // Total trees in this cluster
-  healthyCount?: number;         // Healthy trees count
-  warningCount?: number;         // Warning trees count
-  criticalCount?: number;        // Critical trees count
-  
-  // Metadata
+  assignedFarmerId?: string;
+  assignedFarmerName?: string;
+
+  // Statistics (pre-aggregated in Firestore, computed client-side as fallback)
+  treeCount: number;
+  healthyCount?: number;
+  warningCount?: number;
+  criticalCount?: number;
+
+  // ── NEW: Yield prediction fields ──
+  avgAge?: number;
+  avgHeight?: number;
+  avgCanopySpread?: number;
+  avgLastYield?: number;
+  totalMissedSprayings?: number;
+  varieties?: string[];
+  lastUpdated?: Date;
+
   createdAt?: Date;
   updatedAt?: Date;
+}
+
+// ── NEW: Harvest record ──
+export interface HarvestRecord {
+  id?: string;
+  farmId: string;
+  clusterId: string;
+  clusterName: string;
+  harvestDate: Date;
+  totalKg: number;
+  kgPerTree: number;
+  treeCount: number;
+  variety?: string;
+  notes?: string;
+  recordedBy?: string;
+  createdAt?: Date;
 }
 
 export interface TreeFilter {
@@ -67,23 +113,14 @@ export interface TreeStats {
   clusters: number;
 }
 
-// Helper function to auto-calculate growth stage based on tree age
 export function autoCalculateGrowthStage(tree: Partial<Tree>): GrowthStage {
-  // If tree already has growthStage, use it
-  if (tree.growthStage) {
-    return tree.growthStage;
-  }
-  
-  // Calculate based on planted date
-  if (!tree.plantedDate) {
-    return 'seedling';
-  }
+  if (tree.growthStage) return tree.growthStage;
+  if (!tree.plantedDate) return 'seedling';
 
   const ageInDays = Math.floor(
     (new Date().getTime() - new Date(tree.plantedDate).getTime()) / (1000 * 60 * 60 * 24)
   );
 
-  // Example thresholds (adjust based on your tree types)
   if (ageInDays < 90) return 'seedling';
   if (ageInDays < 365) return 'juvenile';
   if (ageInDays < 730) return 'mature';
@@ -91,63 +128,93 @@ export function autoCalculateGrowthStage(tree: Partial<Tree>): GrowthStage {
   return 'fruiting';
 }
 
-// Helper function to convert Firestore data to Tree type
+/** Compute age in years from a planted date */
+export function computeAgeFromPlantedDate(plantedDate?: Date | null): number | undefined {
+  if (!plantedDate) return undefined;
+  const ms = Date.now() - new Date(plantedDate).getTime();
+  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24 * 365)));
+}
+
 export function convertFirestoreTree(data: any): Tree {
-  const plantedDate = data.plantedDate?.toDate?.() || data.plantedDate;
-  const lastInspection = data.lastInspection?.toDate?.() || data.lastInspectionDate?.toDate?.() || new Date();
-  const createdAt = data.createdAt?.toDate?.() || new Date();
-  const updatedAt = data.updatedAt?.toDate?.() || createdAt;
-  
+  const plantedDate = data.plantedDate?.toDate?.() ?? data.plantedDate;
+  const lastInspection =
+    data.lastInspection?.toDate?.() ??
+    data.lastInspectionDate?.toDate?.() ??
+    new Date();
+  const createdAt = data.createdAt?.toDate?.() ?? new Date();
+  const updatedAt = data.updatedAt?.toDate?.() ?? createdAt;
+
+  // Compute age from plantedDate if not stored
+  const computedAge =
+    data.age ??
+    (plantedDate
+      ? Math.max(0, Math.floor((Date.now() - new Date(plantedDate).getTime()) / (1000 * 60 * 60 * 24 * 365)))
+      : undefined);
+
   return {
     id: data.id || '',
     tree_id: data.tree_id || data.id || '',
     tree_name: data.tree_name || `Tree_${data.id?.slice(0, 8) || 'unknown'}`,
     farmId: data.farmId || '',
-    
+
     type: data.type || 'Unknown',
     variety: data.variety || 'Unknown',
     healthStatus: (data.healthStatus || 'Unknown') as HealthStatus,
-    growthStage: autoCalculateGrowthStage({
-      growthStage: data.growthStage as GrowthStage,
-      plantedDate
-    }),
+    growthStage: autoCalculateGrowthStage({ growthStage: data.growthStage as GrowthStage, plantedDate }),
     cluster: data.cluster || 'Default',
     flagged: data.flagged || false,
-    
+
     notes: data.notes,
     location: data.location,
     plantedDate,
     lastInspection,
-    
+
+    // ── Agronomic fields ──
+    age: computedAge,
+    height: data.height ?? data.heightMeters ?? undefined,
+    canopySpread: data.canopySpread ?? data.canopy ?? undefined,
+    lastYield: data.lastYield ?? data.previousYield ?? undefined,
+    missedSprayings: data.missedSprayings ?? 0,
+
     createdAt,
     updatedAt,
     lastInspectionDate: lastInspection,
   };
 }
 
-// Helper function to convert Firestore data to Cluster type
 export function convertFirestoreCluster(data: any, treeCount: number = 0): Cluster {
-  const createdAt = data.createdAt?.toDate?.() || new Date();
-  const updatedAt = data.updatedAt?.toDate?.() || createdAt;
-  
+  const createdAt = data.createdAt?.toDate?.() ?? new Date();
+  const updatedAt = data.updatedAt?.toDate?.() ?? createdAt;
+  const lastUpdated = data.lastUpdated?.toDate?.() ?? undefined;
+
   return {
     id: data.id || data.name || '',
     farmId: data.farmId || '',
     name: data.name || data.id || '',
     description: data.description,
     location: data.location,
-    
-    treeCount,
+    assignedFarmerId: data.assignedFarmerId,
+    assignedFarmerName: data.assignedFarmerName,
+
+    treeCount: data.treeCount ?? treeCount,
     healthyCount: data.healthyCount,
     warningCount: data.warningCount,
     criticalCount: data.criticalCount,
-    
+
+    // ── Yield prediction fields ──
+    avgAge: data.avgAge,
+    avgHeight: data.avgHeight,
+    avgCanopySpread: data.avgCanopySpread,
+    avgLastYield: data.avgLastYield,
+    totalMissedSprayings: data.totalMissedSprayings,
+    varieties: data.varieties ?? [],
+    lastUpdated,
+
     createdAt,
     updatedAt,
   };
 }
 
-// Type for tree data when adding/updating (matches Flutter TreeService.addTree())
 export interface TreeData {
   tree_id?: string;
   tree_name?: string;
@@ -161,10 +228,17 @@ export interface TreeData {
   location?: string;
   plantedDate?: Date | any;
   lastInspection?: Date | any;
+
+  // ── NEW: agronomic ──
+  age?: number;
+  height?: number;
+  canopySpread?: number;
+  lastYield?: number;
+  missedSprayings?: number;
+
   [key: string]: any;
 }
 
-// Type for cluster data when adding/updating (matches Flutter TreeService.addCluster())
 export interface ClusterData {
   name: string;
   description?: string;
@@ -172,22 +246,17 @@ export interface ClusterData {
   [key: string]: any;
 }
 
-// Utility function to normalize health status (Flutter uses capitalized)
 export function normalizeHealthStatus(status: string): HealthStatus {
-  const normalized = status.toLowerCase();
-  switch (normalized) {
+  switch (status.toLowerCase()) {
     case 'healthy': return 'Healthy';
     case 'warning': return 'Warning';
     case 'critical': return 'Critical';
-    case 'unknown': return 'Unknown';
     default: return 'Unknown';
   }
 }
 
-// Utility function to normalize growth stage
 export function normalizeGrowthStage(stage: string): GrowthStage {
-  const normalized = stage.toLowerCase();
-  switch (normalized) {
+  switch (stage.toLowerCase()) {
     case 'seedling': return 'seedling';
     case 'juvenile': return 'juvenile';
     case 'mature': return 'mature';

@@ -71,7 +71,6 @@ export function SetupBottomNavigation({
               </>
             ) : isLastStep ? (
               <>
-                <Sparkles className="w-4 h-4" />
                 Complete Setup
               </>
             ) : (

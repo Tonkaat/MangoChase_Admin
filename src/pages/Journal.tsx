@@ -76,7 +76,7 @@ export default function Journal() {
           <div>
             <h1 className="font-display text-3xl font-bold">Farm Journal</h1>
             <p className="text-muted-foreground">
-              Seb's Diary
+              Document and track farm activities, health alerts, and milestones
             </p>
           </div>
         </div>

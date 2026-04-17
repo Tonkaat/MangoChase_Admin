@@ -1,10 +1,5 @@
 // src/pages/TreeManagement.tsx
-// Key changes vs v1.0:
-//  - handleAddTree now supports batch via onBatchSubmit prop
-//  - QRCodeModal now receives allTrees for selection/batch printing
-//  - ClusterManagement receives clusters with assignedUsers
-//  - handleSync cleaned up
-//  - Minor code tidying
+// v2.0 — cluster-level yield, harvest recording, agronomic fields
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +13,7 @@ import { ClusterManagement } from "@/components/trees/ClusterManagement";
 import { TreeStatsCards } from "@/components/trees/TreeStatsCards";
 import { AddTreeModal } from "@/components/trees/AddTreeModal";
 import { AddEditClusterModal } from "@/components/trees/AddEditClusterModal";
+import { RecordHarvestModal } from "@/components/trees/RecordHarvestModal";
 import {
   Tree,
   TreeFilter,
@@ -25,12 +21,16 @@ import {
   TreeStats,
   TreeData,
   ClusterData,
+  HarvestRecord,
   convertFirestoreTree as convertFirestoreTreeHelper,
   convertFirestoreCluster as convertFirestoreClusterHelper,
   normalizeHealthStatus,
   normalizeGrowthStage,
 } from "@/types/tree.types";
-import { Plus, Download, Upload, RefreshCw, Loader2, Trees } from "lucide-react";
+import {
+  Plus, Download, Upload, RefreshCw, Loader2, Trees, Wheat,
+  Database,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -45,6 +45,8 @@ import {
 import { firebaseService } from "@/services/firebase";
 import { treeNamingService } from "@/services/firebase/treeNamingService";
 import { auth } from "@/config/firebase";
+
+// ─── Local FirestoreTree type (includes new agronomic fields) ─────────────────
 
 interface FirestoreTree {
   id: string;
@@ -63,6 +65,12 @@ interface FirestoreTree {
   createdAt?: any;
   updatedAt?: any;
   farmId?: string;
+  // ── Agronomic ──
+  age?: number;
+  height?: number;
+  canopySpread?: number;
+  lastYield?: number;
+  missedSprayings?: number;
 }
 
 interface FirestoreCluster {
@@ -71,20 +79,31 @@ interface FirestoreCluster {
   description?: string;
   location?: string;
   createdAt?: any;
+  // ── Stats (pre-aggregated) ──
   treeCount?: number;
+  healthyCount?: number;
+  warningCount?: number;
+  criticalCount?: number;
+  avgAge?: number;
+  avgHeight?: number;
+  avgCanopySpread?: number;
+  avgLastYield?: number;
+  totalMissedSprayings?: number;
+  varieties?: string[];
+  lastUpdated?: any;
   farmId?: string;
-  // Users assigned to this cluster come from the users collection
   assignedUserIds?: string[];
+  assignedFarmerId?: string;
+  assignedFarmerName?: string;
 }
 
-// Farmer profile shape (minimal)
 interface FarmerProfile {
   id: string;
   name: string;
   email?: string;
   avatarUrl?: string;
   role?: string;
-  clusterAssignment?: string; // cluster name
+  clusterAssignment?: string;
 }
 
 const initialFilters: TreeFilter = {
@@ -94,6 +113,8 @@ const initialFilters: TreeFilter = {
   cluster: "all",
   flagged: "all",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function TreeManagement() {
   const [farmId, setFarmId] = useState<string>("");
@@ -111,18 +132,21 @@ export default function TreeManagement() {
   const [qrShowAll, setQrShowAll] = useState(false);
   const [showAddTreeModal, setShowAddTreeModal] = useState(false);
   const [showAddClusterModal, setShowAddClusterModal] = useState(false);
+  const [showHarvestModal, setShowHarvestModal] = useState(false);
+  const [harvestDefaultCluster, setHarvestDefaultCluster] = useState<string | undefined>();
   const [deleteConfirmTree, setDeleteConfirmTree] = useState<Tree | null>(null);
   const [deleteConfirmCluster, setDeleteConfirmCluster] = useState<Cluster | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  const treesUnsubscribeRef = useRef<() => void>(() => {});
-  const clustersUnsubscribeRef = useRef<() => void>(() => {});
+  const treesUnsubRef = useRef<() => void>(() => {});
+  const clustersUnsubRef = useRef<() => void>(() => {});
 
-  // Load farmId from user profile
+  // ── Load farmId ──────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    const loadFarmId = async () => {
+    const load = async () => {
       try {
         const user = auth.currentUser;
         if (user) {
@@ -140,92 +164,79 @@ export default function TreeManagement() {
         setLoading(false);
       }
     };
-    loadFarmId();
+    load();
     return () => {
-      treesUnsubscribeRef.current();
-      clustersUnsubscribeRef.current();
+      treesUnsubRef.current();
+      clustersUnsubRef.current();
     };
   }, []);
 
-  const convertFirestoreTree = (firestoreTree: FirestoreTree): Tree =>
-    convertFirestoreTreeHelper({ id: firestoreTree.id, ...firestoreTree });
+  // ── Converters ───────────────────────────────────────────────────────────────
+
+  const convertFirestoreTree = (ft: FirestoreTree): Tree =>
+    convertFirestoreTreeHelper({ id: ft.id, ...ft });
 
   const convertFirestoreCluster = useCallback(
-    (firestoreCluster: FirestoreCluster): Cluster & { assignedUsers?: FarmerProfile[] } => {
-      const treeCount = trees.filter((t) => t.cluster === firestoreCluster.name).length;
+    (fc: FirestoreCluster): Cluster => {
+      // Use pre-aggregated treeCount if available; otherwise count client-side
+      const fallbackCount = trees.filter((t) => t.cluster === fc.name).length;
       const base = convertFirestoreClusterHelper(
-        { id: firestoreCluster.id, ...firestoreCluster },
-        treeCount
+        { id: fc.id, ...fc },
+        fc.treeCount ?? fallbackCount,
       );
-      // Attach assigned farmers
-      const assignedUsers = farmers.filter(
-        (f) => f.clusterAssignment === firestoreCluster.name
-      );
-      return { ...base, assignedUsers };
+      const assignedUsers = farmers.filter((f) => f.clusterAssignment === fc.name);
+      return { ...base, assignedUsers } as any;
     },
-    [trees, farmers]
+    [trees, farmers],
   );
 
-  // Real-time listeners
+  // ── Real-time listeners ──────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!farmId) return;
 
-    treesUnsubscribeRef.current = firebaseService.getTrees(farmId, (snapshot) => {
-      const firestoreTrees: FirestoreTree[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setTrees(firestoreTrees.map(convertFirestoreTree));
+    treesUnsubRef.current = firebaseService.getTrees(farmId, (snapshot) => {
+      const ft: FirestoreTree[] = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setTrees(ft.map(convertFirestoreTree));
       setLoading(false);
     });
 
-    clustersUnsubscribeRef.current = firebaseService.getClusters(farmId, (snapshot) => {
-      const firestoreClusters: FirestoreCluster[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setClusters(firestoreClusters.map((c) => convertFirestoreCluster(c)));
+    clustersUnsubRef.current = firebaseService.getClusters(farmId, (snapshot) => {
+      const fc: FirestoreCluster[] = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setClusters(fc.map((c) => convertFirestoreCluster(c)));
     });
-
-    // Load farmers for the farm
-    // NOTE: Replace with your actual user/farmer loading method
-    // Example: firebaseService.getFarmers(farmId, (snapshot) => { ... })
   }, [farmId]);
 
-  // Re-derive cluster assignedUsers whenever farmers or trees change
+  // Re-derive cluster assigned users when farmers change
   useEffect(() => {
     if (clusters.length > 0 && farmers.length > 0) {
       setClusters((prev) =>
         prev.map((c) => ({
           ...c,
           assignedUsers: farmers.filter((f) => f.clusterAssignment === c.name),
-        }))
+        })),
       );
     }
   }, [farmers]);
 
   const clusterNames = useMemo(() => clusters.map((c) => c.name), [clusters]);
 
-  // Stats
+  // ── Stats ────────────────────────────────────────────────────────────────────
+
   const stats: TreeStats = useMemo(
     () => ({
       total: trees.length,
-      healthy: trees.filter(
-        (t) => t.healthStatus === "Healthy" || t.healthStatus === "healthy"
-      ).length,
-      warning: trees.filter(
-        (t) => t.healthStatus === "Warning" || t.healthStatus === "warning"
-      ).length,
-      critical: trees.filter(
-        (t) => t.healthStatus === "Critical" || t.healthStatus === "critical"
-      ).length,
+      healthy: trees.filter((t) => t.healthStatus === "Healthy" || t.healthStatus === "healthy").length,
+      warning: trees.filter((t) => t.healthStatus === "Warning" || t.healthStatus === "warning").length,
+      critical: trees.filter((t) => t.healthStatus === "Critical" || t.healthStatus === "critical").length,
       flagged: trees.filter((t) => t.flagged).length,
       clusters: clusters.length,
     }),
-    [trees, clusters]
+    [trees, clusters],
   );
 
-  // Filtered trees
+  // ── Filtered trees ───────────────────────────────────────────────────────────
+
   const filteredTrees = useMemo(() => {
     return trees.filter((tree) => {
       if (selectedCluster !== null && tree.cluster !== selectedCluster) return false;
@@ -242,19 +253,11 @@ export default function TreeManagement() {
         if (!match) return false;
       }
 
-      if (
-        filters.healthStatus !== "all" &&
-        tree.healthStatus?.toLowerCase() !== filters.healthStatus.toLowerCase()
-      ) {
-        return false;
-      }
+      if (filters.healthStatus !== "all" &&
+        tree.healthStatus?.toLowerCase() !== filters.healthStatus.toLowerCase()) return false;
 
-      if (
-        filters.growthStage !== "all" &&
-        tree.growthStage?.toLowerCase() !== filters.growthStage.toLowerCase()
-      ) {
-        return false;
-      }
+      if (filters.growthStage !== "all" &&
+        tree.growthStage?.toLowerCase() !== filters.growthStage.toLowerCase()) return false;
 
       if (filters.cluster !== "all" && tree.cluster !== filters.cluster) return false;
       if (filters.flagged === "flagged" && !tree.flagged) return false;
@@ -264,25 +267,26 @@ export default function TreeManagement() {
     });
   }, [trees, filters, selectedCluster]);
 
-  // Handlers
+  // ── Handlers ─────────────────────────────────────────────────────────────────
+
   const handleSync = useCallback(async () => {
     if (!farmId) return;
     setSyncing(true);
-    treesUnsubscribeRef.current();
-    clustersUnsubscribeRef.current();
+    treesUnsubRef.current();
+    clustersUnsubRef.current();
     setTimeout(() => {
-      treesUnsubscribeRef.current = firebaseService.getTrees(farmId, (snapshot) => {
+      treesUnsubRef.current = firebaseService.getTrees(farmId, (snapshot) => {
         setTrees(
           snapshot.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() } as FirestoreTree))
-            .map(convertFirestoreTree)
+            .map((d) => ({ id: d.id, ...d.data() } as FirestoreTree))
+            .map(convertFirestoreTree),
         );
       });
-      clustersUnsubscribeRef.current = firebaseService.getClusters(farmId, (snapshot) => {
+      clustersUnsubRef.current = firebaseService.getClusters(farmId, (snapshot) => {
         setClusters(
           snapshot.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() } as FirestoreCluster))
-            .map((c) => convertFirestoreCluster(c))
+            .map((d) => ({ id: d.id, ...d.data() } as FirestoreCluster))
+            .map((c) => convertFirestoreCluster(c)),
         );
       });
       setSyncing(false);
@@ -297,28 +301,22 @@ export default function TreeManagement() {
     setViewingTree(null);
   }, []);
 
-  const handleGenerateQR = useCallback(
-    (tree: Tree) => {
-      setQrModalTrees([tree]);
-      setQrShowAll(false);
-      setShowQRModal(true);
-    },
-    []
-  );
+  const handleGenerateQR = useCallback((tree: Tree) => {
+    setQrModalTrees([tree]);
+    setQrShowAll(false);
+    setShowQRModal(true);
+  }, []);
 
-  const handleToggleFlag = useCallback(
-    async (tree: Tree) => {
-      if (!farmId) return;
-      try {
-        await firebaseService.flagTree(farmId, tree.id, !tree.flagged);
-        toast.success(!tree.flagged ? "Tree flagged" : "Flag removed");
-        setViewingTree(null);
-      } catch {
-        toast.error("Failed to update flag");
-      }
-    },
-    [farmId]
-  );
+  const handleToggleFlag = useCallback(async (tree: Tree) => {
+    if (!farmId) return;
+    try {
+      await firebaseService.flagTree(farmId, tree.id, !tree.flagged);
+      toast.success(!tree.flagged ? "Tree flagged" : "Flag removed");
+      setViewingTree(null);
+    } catch {
+      toast.error("Failed to update flag");
+    }
+  }, [farmId]);
 
   const handleDeleteTree = useCallback((tree: Tree) => {
     setDeleteConfirmTree(tree);
@@ -336,26 +334,62 @@ export default function TreeManagement() {
     }
   }, [deleteConfirmTree, farmId]);
 
-  // Single tree add/edit
-  const handleAddTree = useCallback(
-    async (data: TreeData) => {
-      if (!farmId || !data.variety) return;
-      if (editingTree) {
-        const updates: TreeData = {
-          ...(data.type && { type: data.type }),
-          ...(data.variety && { variety: data.variety }),
-          ...(data.healthStatus && { healthStatus: normalizeHealthStatus(data.healthStatus) }),
-          ...(data.growthStage && { growthStage: normalizeGrowthStage(data.growthStage) }),
+  // Single tree add / edit
+  const handleAddTree = useCallback(async (data: TreeData) => {
+    if (!farmId || !data.variety) return;
+    if (editingTree) {
+      const updates: TreeData = {
+        ...(data.type && { type: data.type }),
+        ...(data.variety && { variety: data.variety }),
+        ...(data.healthStatus && { healthStatus: normalizeHealthStatus(data.healthStatus) }),
+        ...(data.growthStage && { growthStage: normalizeGrowthStage(data.growthStage) }),
+        cluster: data.cluster || undefined,
+        notes: data.notes,
+        location: data.location,
+        ...(data.plantedDate && { plantedDate: data.plantedDate }),
+        // ── Agronomic fields ──
+        ...(data.height !== undefined && { height: data.height }),
+        ...(data.canopySpread !== undefined && { canopySpread: data.canopySpread }),
+        ...(data.lastYield !== undefined && { lastYield: data.lastYield }),
+        lastInspection: new Date(),
+      };
+      await firebaseService.updateTree(farmId, editingTree.id, updates);
+      toast.success("Tree updated");
+      setEditingTree(null);
+    } else {
+      const treeData = await treeNamingService.generateTreeData({
+        farmId,
+        variety: data.variety,
+        additionalData: {
+          type: data.type || "Mango",
+          healthStatus: normalizeHealthStatus(data.healthStatus || "Healthy"),
+          growthStage: normalizeGrowthStage(data.growthStage || "seedling"),
           cluster: data.cluster || undefined,
+          flagged: false,
           notes: data.notes,
           location: data.location,
-          ...(data.plantedDate && { plantedDate: data.plantedDate }),
-          lastInspection: new Date(),
-        };
-        await firebaseService.updateTree(farmId, editingTree.id, updates);
-        toast.success("Tree updated");
-        setEditingTree(null);
-      } else {
+          plantedDate: data.plantedDate || new Date(),
+          // ── Agronomic fields ──
+          height: data.height,
+          canopySpread: data.canopySpread,
+          lastYield: data.lastYield,
+          missedSprayings: 0,
+        },
+      });
+      await firebaseService.addTree(farmId, treeData);
+      toast.success("Tree added");
+    }
+  }, [editingTree, farmId]);
+
+  // Batch add
+  const handleBatchAddTrees = useCallback(async (dataList: TreeData[]) => {
+    if (!farmId) return;
+    let added = 0;
+    const errors: string[] = [];
+
+    for (const data of dataList) {
+      if (!data.variety) continue;
+      try {
         const treeData = await treeNamingService.generateTreeData({
           farmId,
           variety: data.variety,
@@ -368,86 +402,63 @@ export default function TreeManagement() {
             notes: data.notes,
             location: data.location,
             plantedDate: data.plantedDate || new Date(),
+            height: data.height,
+            canopySpread: data.canopySpread,
+            lastYield: data.lastYield,
+            missedSprayings: 0,
           },
         });
         await firebaseService.addTree(farmId, treeData);
-        toast.success("Tree added");
+        added++;
+      } catch (err: any) {
+        errors.push(err.message || "Unknown error");
       }
-    },
-    [editingTree, farmId]
-  );
+    }
 
-  // Batch tree add
-  const handleBatchAddTrees = useCallback(
-    async (dataList: TreeData[]) => {
-      if (!farmId) return;
-      let added = 0;
-      const errors: string[] = [];
+    if (added > 0) toast.success(`${added} tree${added !== 1 ? "s" : ""} added`);
+    if (errors.length > 0) toast.error(`${errors.length} tree${errors.length !== 1 ? "s" : ""} failed`);
+    if (added === 0 && errors.length > 0) throw new Error("All trees failed to add");
+  }, [farmId]);
 
-      for (const data of dataList) {
-        if (!data.variety) continue;
-        try {
-          const treeData = await treeNamingService.generateTreeData({
-            farmId,
-            variety: data.variety,
-            additionalData: {
-              type: data.type || "Mango",
-              healthStatus: normalizeHealthStatus(data.healthStatus || "Healthy"),
-              growthStage: normalizeGrowthStage(data.growthStage || "seedling"),
-              cluster: data.cluster || undefined,
-              flagged: false,
-              notes: data.notes,
-              location: data.location,
-              plantedDate: data.plantedDate || new Date(),
-            },
-          });
-          await firebaseService.addTree(farmId, treeData);
-          added++;
-        } catch (err: any) {
-          errors.push(err.message || "Unknown error");
-        }
-      }
+  // ── NEW: Harvest recording ───────────────────────────────────────────────────
 
-      if (added > 0) toast.success(`${added} tree${added !== 1 ? "s" : ""} added successfully`);
-      if (errors.length > 0) toast.error(`${errors.length} tree${errors.length !== 1 ? "s" : ""} failed to add`);
+  const handleRecordHarvest = useCallback(async (
+    harvest: Omit<HarvestRecord, 'id' | 'createdAt'>,
+  ) => {
+    if (!farmId) return;
+    await firebaseService.recordHarvest(farmId, harvest);
+    toast.success(`Harvest recorded — ${harvest.totalKg} kg from ${harvest.clusterName}`);
+  }, [farmId]);
 
-      if (added === 0 && errors.length > 0) throw new Error("All trees failed to add");
-    },
-    [farmId]
-  );
+  const handleOpenHarvestForCluster = useCallback((clusterName: string) => {
+    setHarvestDefaultCluster(clusterName);
+    setShowHarvestModal(true);
+  }, []);
 
-  // Bulk ops
-  const handleBulkFlag = useCallback(
-    async (flag: boolean) => {
-      if (!farmId || !selectedTrees.length) return;
-      try {
-        for (const id of selectedTrees) await firebaseService.flagTree(farmId, id, flag);
-        toast.success(`${selectedTrees.length} trees ${flag ? "flagged" : "unflagged"}`);
-        setSelectedTrees([]);
-      } catch {
-        toast.error("Failed to update flags");
-      }
-    },
-    [selectedTrees, farmId]
-  );
+  // ── Bulk ops ─────────────────────────────────────────────────────────────────
 
-  const handleBulkChangeCluster = useCallback(
-    async (cluster: string) => {
-      if (!farmId || !selectedTrees.length) return;
-      if (cluster === "__new__") {
-        setShowAddClusterModal(true);
-        return;
-      }
-      try {
-        await firebaseService.batchUpdateTreesCluster(farmId, selectedTrees, cluster);
-        toast.success(`${selectedTrees.length} trees moved to ${cluster}`);
-        setSelectedTrees([]);
-      } catch {
-        toast.error("Failed to change cluster");
-      }
-    },
-    [selectedTrees, farmId]
-  );
+  const handleBulkFlag = useCallback(async (flag: boolean) => {
+    if (!farmId || !selectedTrees.length) return;
+    try {
+      for (const id of selectedTrees) await firebaseService.flagTree(farmId, id, flag);
+      toast.success(`${selectedTrees.length} trees ${flag ? "flagged" : "unflagged"}`);
+      setSelectedTrees([]);
+    } catch {
+      toast.error("Failed to update flags");
+    }
+  }, [selectedTrees, farmId]);
+
+  const handleBulkChangeCluster = useCallback(async (cluster: string) => {
+    if (!farmId || !selectedTrees.length) return;
+    if (cluster === "__new__") { setShowAddClusterModal(true); return; }
+    try {
+      await firebaseService.batchUpdateTreesCluster(farmId, selectedTrees, cluster);
+      toast.success(`${selectedTrees.length} trees moved to ${cluster}`);
+      setSelectedTrees([]);
+    } catch {
+      toast.error("Failed to change cluster");
+    }
+  }, [selectedTrees, farmId]);
 
   const handleBulkDelete = useCallback(() => setShowBulkDeleteConfirm(true), []);
 
@@ -464,13 +475,13 @@ export default function TreeManagement() {
   }, [selectedTrees, farmId]);
 
   const handleBulkGenerateQR = useCallback(() => {
-    const selected = trees.filter((t) => selectedTrees.includes(t.id));
-    setQrModalTrees(selected);
+    setQrModalTrees(trees.filter((t) => selectedTrees.includes(t.id)));
     setQrShowAll(false);
     setShowQRModal(true);
   }, [selectedTrees, trees]);
 
-  // Cluster ops
+  // ── Cluster ops ──────────────────────────────────────────────────────────────
+
   const handleCreateCluster = useCallback(() => {
     setEditingCluster(null);
     setShowAddClusterModal(true);
@@ -496,30 +507,40 @@ export default function TreeManagement() {
     }
   }, [deleteConfirmCluster, farmId]);
 
-  const handleSubmitCluster = useCallback(
-    async (data: ClusterData) => {
-      if (!farmId || !data.name) return;
-      if (editingCluster) {
-        await firebaseService.renameCluster(farmId, editingCluster.name, data.name);
-        toast.success("Cluster renamed");
-      } else {
-        await firebaseService.addCluster(farmId, data.name);
-        toast.success(`Cluster "${data.name}" created`);
-      }
-      setEditingCluster(null);
-    },
-    [editingCluster, farmId]
-  );
+  const handleSubmitCluster = useCallback(async (data: ClusterData) => {
+    if (!farmId || !data.name) return;
+    if (editingCluster) {
+      await firebaseService.renameCluster(farmId, editingCluster.name, data.name);
+      toast.success("Cluster renamed");
+    } else {
+      await firebaseService.addCluster(farmId, data.name);
+      toast.success(`Cluster "${data.name}" created`);
+    }
+    setEditingCluster(null);
+  }, [editingCluster, farmId]);
 
-  const handleGenerateClusterQR = useCallback(
-    (cluster: Cluster) => {
-      const clusterTrees = trees.filter((t) => t.cluster === cluster.name);
-      setQrModalTrees(clusterTrees);
-      setQrShowAll(false);
-      setShowQRModal(true);
-    },
-    [trees]
-  );
+  const handleGenerateClusterQR = useCallback((cluster: Cluster) => {
+    setQrModalTrees(trees.filter((t) => t.cluster === cluster.name));
+    setQrShowAll(false);
+    setShowQRModal(true);
+  }, [trees]);
+
+  // ── Recompute all cluster stats (admin action) ───────────────────────────────
+
+  const handleRecomputeStats = useCallback(async () => {
+    if (!farmId) return;
+    setSyncing(true);
+    try {
+      await firebaseService.recomputeAllClusterStats(farmId);
+      toast.success("Cluster stats recomputed");
+    } catch {
+      toast.error("Failed to recompute stats");
+    } finally {
+      setSyncing(false);
+    }
+  }, [farmId]);
+
+  // ── Loading ──────────────────────────────────────────────────────────────────
 
   if (loading && !farmId) {
     return (
@@ -528,6 +549,8 @@ export default function TreeManagement() {
       </div>
     );
   }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -544,12 +567,21 @@ export default function TreeManagement() {
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm">
             <Upload className="mr-2 h-4 w-4" /> Import
           </Button>
           <Button variant="outline" size="sm">
             <Download className="mr-2 h-4 w-4" /> Export
+          </Button>
+          {/* ── NEW: Record Harvest button ── */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setHarvestDefaultCluster(undefined); setShowHarvestModal(true); }}
+            className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+          >
+            <Wheat className="mr-2 h-4 w-4" /> Record Harvest
           </Button>
           <Button
             variant="outline"
@@ -583,10 +615,24 @@ export default function TreeManagement() {
             onEditCluster={handleEditCluster}
             onDeleteCluster={handleDeleteCluster}
             onGenerateClusterQR={handleGenerateClusterQR}
+            // ── NEW: harvest shortcut from cluster panel ──
+            onRecordHarvest={handleOpenHarvestForCluster}
           />
-        </div>
 
-        {/* Table area */}
+          {/* Recompute stats action */}
+          {/* <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-muted-foreground"
+            onClick={handleRecomputeStats}
+            disabled={syncing}
+          >
+            <Database className="mr-1.5 h-3.5 w-3.5" />
+            {syncing ? "Computing…" : "Recompute Cluster Stats"}
+          </Button> */}
+        </div>
+        
+        {/* Table */}
         <div className="space-y-4">
           <Card className="shadow-soft">
             <CardHeader className="pb-3">
@@ -598,12 +644,7 @@ export default function TreeManagement() {
                     {filteredTrees.length !== trees.length && ` of ${trees.length}`})
                   </span>
                 </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleSync}
-                  disabled={syncing}
-                >
+                <Button variant="ghost" size="sm" onClick={handleSync} disabled={syncing}>
                   <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
                   Sync
                 </Button>
@@ -654,7 +695,7 @@ export default function TreeManagement() {
         onDelete={handleDeleteTree}
       />
 
-      {/* QR Modal — passes allTrees for batch selection */}
+      {/* QR Modal */}
       <QRCodeModal
         trees={qrModalTrees}
         allTrees={qrShowAll ? trees : undefined}
@@ -665,10 +706,7 @@ export default function TreeManagement() {
       {/* Add/Edit Tree Modal */}
       <AddTreeModal
         open={showAddTreeModal}
-        onOpenChange={(open) => {
-          setShowAddTreeModal(open);
-          if (!open) setEditingTree(null);
-        }}
+        onOpenChange={(open) => { setShowAddTreeModal(open); if (!open) setEditingTree(null); }}
         clusters={clusterNames}
         onSubmit={handleAddTree}
         onBatchSubmit={handleBatchAddTrees}
@@ -678,35 +716,34 @@ export default function TreeManagement() {
       {/* Add/Edit Cluster Modal */}
       <AddEditClusterModal
         open={showAddClusterModal}
-        onOpenChange={(open) => {
-          setShowAddClusterModal(open);
-          if (!open) setEditingCluster(null);
-        }}
+        onOpenChange={(open) => { setShowAddClusterModal(open); if (!open) setEditingCluster(null); }}
         onSubmit={handleSubmitCluster}
         editingCluster={editingCluster}
         existingClusterNames={clusterNames}
       />
 
+      {/* ── NEW: Record Harvest Modal ── */}
+      <RecordHarvestModal
+        open={showHarvestModal}
+        onOpenChange={setShowHarvestModal}
+        clusters={clusters}
+        onSubmit={handleRecordHarvest}
+        farmId={farmId}
+        defaultClusterId={harvestDefaultCluster}
+      />
+
       {/* Delete Tree */}
-      <AlertDialog
-        open={Boolean(deleteConfirmTree)}
-        onOpenChange={(open) => !open && setDeleteConfirmTree(null)}
-      >
+      <AlertDialog open={Boolean(deleteConfirmTree)} onOpenChange={(o) => !o && setDeleteConfirmTree(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Tree</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete{" "}
-              <strong>{deleteConfirmTree?.tree_name || deleteConfirmTree?.id.slice(0, 8)}</strong>?
-              This cannot be undone.
+              Delete <strong>{deleteConfirmTree?.tree_name || deleteConfirmTree?.id.slice(0, 8)}</strong>? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDeleteTree}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction onClick={confirmDeleteTree} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -714,10 +751,7 @@ export default function TreeManagement() {
       </AlertDialog>
 
       {/* Delete Cluster */}
-      <AlertDialog
-        open={Boolean(deleteConfirmCluster)}
-        onOpenChange={(open) => !open && setDeleteConfirmCluster(null)}
-      >
+      <AlertDialog open={Boolean(deleteConfirmCluster)} onOpenChange={(o) => !o && setDeleteConfirmCluster(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Cluster</AlertDialogTitle>
@@ -730,10 +764,7 @@ export default function TreeManagement() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDeleteCluster}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction onClick={confirmDeleteCluster} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete Cluster
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -751,10 +782,7 @@ export default function TreeManagement() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmBulkDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction onClick={confirmBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete All
             </AlertDialogAction>
           </AlertDialogFooter>

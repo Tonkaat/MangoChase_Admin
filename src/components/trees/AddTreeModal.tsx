@@ -22,6 +22,12 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   Tree,
   TreeData,
   HealthStatus,
@@ -33,13 +39,16 @@ import {
   Loader2,
   Calendar,
   Plus,
-  Minus,
   Copy,
   TreeDeciduous,
   Layers,
   X,
   ChevronDown,
   ChevronUp,
+  Ruler,
+  Leaf,
+  Droplets,
+  Scale,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
@@ -65,6 +74,10 @@ type FormEntry = {
   notes: string;
   location: string;
   plantedDate: Date | undefined;
+  // ── NEW: Agronomic fields ──
+  height: string;        // metres — string for input binding
+  canopySpread: string;  // metres
+  lastYield: string;     // kg
 };
 
 const DEFAULT_ENTRY = (): FormEntry => ({
@@ -77,6 +90,9 @@ const DEFAULT_ENTRY = (): FormEntry => ({
   notes: "",
   location: "",
   plantedDate: undefined,
+  height: "",
+  canopySpread: "",
+  lastYield: "",
 });
 
 const HEALTH_STATUSES: { value: HealthStatus; label: string; color: string }[] = [
@@ -94,6 +110,8 @@ const GROWTH_STAGES: { value: GrowthStage; label: string }[] = [
   { value: "fruiting", label: "Fruiting" },
 ];
 
+// ─── Single tree form ────────────────────────────────────────────────────────
+
 function SingleTreeForm({
   entry,
   clusters,
@@ -107,14 +125,13 @@ function SingleTreeForm({
 }) {
   return (
     <div className="space-y-4">
-      {/* Type + Variety row */}
+      {/* Type + Variety */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="tree-type" className="text-xs">
+          <Label className="text-xs">
             Tree Type <span className="text-destructive">*</span>
           </Label>
           <Input
-            id="tree-type"
             placeholder="e.g., Mango"
             value={entry.type}
             onChange={(e) => onChange("type", e.target.value)}
@@ -123,11 +140,10 @@ function SingleTreeForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="tree-variety" className="text-xs">
+          <Label className="text-xs">
             Variety <span className="text-destructive">*</span>
           </Label>
           <Input
-            id="tree-variety"
             placeholder="e.g., Carabao"
             value={entry.variety}
             onChange={(e) => onChange("variety", e.target.value)}
@@ -137,7 +153,7 @@ function SingleTreeForm({
         </div>
       </div>
 
-      {/* Health + Growth row */}
+      {/* Health + Growth */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">Health Status</Label>
@@ -199,7 +215,7 @@ function SingleTreeForm({
         </Select>
       </div>
 
-      {/* Location + Planted Date row */}
+      {/* Location + Planted Date */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">Location (Optional)</Label>
@@ -219,7 +235,7 @@ function SingleTreeForm({
                 variant="outline"
                 className={cn(
                   "h-9 w-full justify-start text-left font-normal text-sm",
-                  !entry.plantedDate && "text-muted-foreground"
+                  !entry.plantedDate && "text-muted-foreground",
                 )}
                 disabled={disabled}
               >
@@ -239,6 +255,81 @@ function SingleTreeForm({
         </div>
       </div>
 
+      {/* ── NEW: Agronomic fields (collapsible) ── */}
+      <Accordion type="single" collapsible>
+        <AccordionItem value="agronomic" className="border rounded-lg px-3">
+          <AccordionTrigger className="text-xs font-medium text-muted-foreground hover:no-underline py-2">
+            <span className="flex items-center gap-1.5">
+              <Ruler className="h-3.5 w-3.5" />
+              Agronomic Details
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 ml-1">
+                Improves yield prediction
+              </Badge>
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="pb-3">
+            <div className="space-y-3 pt-1">
+              <div className="grid grid-cols-2 gap-3">
+                {/* Height */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Ruler className="h-3 w-3 text-muted-foreground" />
+                    Height (metres)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="e.g., 4.5"
+                    value={entry.height}
+                    onChange={(e) => onChange("height", e.target.value)}
+                    disabled={disabled}
+                    className="h-9"
+                  />
+                </div>
+                {/* Canopy */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs flex items-center gap-1">
+                    <Leaf className="h-3 w-3 text-muted-foreground" />
+                    Canopy Spread (m)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="e.g., 3.5"
+                    value={entry.canopySpread}
+                    onChange={(e) => onChange("canopySpread", e.target.value)}
+                    disabled={disabled}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+              {/* Last Yield */}
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center gap-1">
+                  <Scale className="h-3 w-3 text-muted-foreground" />
+                  Last Known Yield (kg/tree)
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  placeholder="e.g., 20"
+                  value={entry.lastYield}
+                  onChange={(e) => onChange("lastYield", e.target.value)}
+                  disabled={disabled}
+                  className="h-9"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Leave blank if unknown — yield data is also captured via harvest records.
+                </p>
+              </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+
       {/* Notes */}
       <div className="space-y-1.5">
         <Label className="text-xs">Notes (Optional)</Label>
@@ -254,6 +345,8 @@ function SingleTreeForm({
     </div>
   );
 }
+
+// ─── Batch card ───────────────────────────────────────────────────────────────
 
 function BatchTreeCard({
   entry,
@@ -285,11 +378,7 @@ function BatchTreeCard({
 
   return (
     <div className={`rounded-lg border transition-all ${isValid ? "border-border" : "border-dashed border-muted-foreground/40"}`}>
-      {/* Card header */}
-      <div
-        className="flex cursor-pointer items-center gap-3 p-3"
-        onClick={onToggle}
-      >
+      <div className="flex cursor-pointer items-center gap-3 p-3" onClick={onToggle}>
         <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isValid ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
           {index + 1}
         </div>
@@ -297,54 +386,31 @@ function BatchTreeCard({
           <p className={`text-sm truncate ${isValid ? "text-foreground" : "text-muted-foreground"}`}>
             {summary}
           </p>
-          {!isValid && (
-            <p className="text-xs text-destructive/70">Type and variety required</p>
-          )}
+          {!isValid && <p className="text-xs text-destructive/70">Type and variety required</p>}
         </div>
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={onDuplicate}
-            disabled={disabled}
-            title="Duplicate entry"
-          >
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onDuplicate} disabled={disabled} title="Duplicate">
             <Copy className="h-3 w-3" />
           </Button>
           {canRemove && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-destructive hover:text-destructive"
-              onClick={onRemove}
-              disabled={disabled}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onRemove} disabled={disabled}>
               <X className="h-3 w-3" />
             </Button>
           )}
-          {isExpanded ? (
-            <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
+          {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
       </div>
 
-      {/* Expanded form */}
       {isExpanded && (
         <div className="border-t px-3 pb-3 pt-3">
-          <SingleTreeForm
-            entry={entry}
-            clusters={clusters}
-            disabled={disabled}
-            onChange={onChange}
-          />
+          <SingleTreeForm entry={entry} clusters={clusters} disabled={disabled} onChange={onChange} />
         </div>
       )}
     </div>
   );
 }
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export function AddTreeModal({
   open,
@@ -360,7 +426,6 @@ export function AddTreeModal({
   const [expandedIdx, setExpandedIdx] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [batchCount, setBatchCount] = useState(2);
 
   useEffect(() => {
     if (open) {
@@ -375,6 +440,9 @@ export function AddTreeModal({
           notes: editingTree.notes || "",
           location: editingTree.location || "",
           plantedDate: editingTree.plantedDate,
+          height: editingTree.height != null ? String(editingTree.height) : "",
+          canopySpread: editingTree.canopySpread != null ? String(editingTree.canopySpread) : "",
+          lastYield: editingTree.lastYield != null ? String(editingTree.lastYield) : "",
         });
         setMode("single");
       } else {
@@ -386,15 +454,11 @@ export function AddTreeModal({
     }
   }, [open, editingTree]);
 
-  const updateSingleField = (field: keyof FormEntry, value: any) => {
+  const updateSingleField = (field: keyof FormEntry, value: any) =>
     setSingleEntry((prev) => ({ ...prev, [field]: value }));
-  };
 
-  const updateBatchField = (idx: number, field: keyof FormEntry, value: any) => {
-    setBatchEntries((prev) =>
-      prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e))
-    );
-  };
+  const updateBatchField = (idx: number, field: keyof FormEntry, value: any) =>
+    setBatchEntries((prev) => prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e)));
 
   const addBatchEntry = () => {
     setBatchEntries((prev) => [...prev, DEFAULT_ENTRY()]);
@@ -425,6 +489,11 @@ export function AddTreeModal({
     location: entry.location.trim() || undefined,
     plantedDate: entry.plantedDate,
     lastInspection: new Date(),
+    // ── Agronomic ──
+    height: entry.height ? parseFloat(entry.height) : undefined,
+    canopySpread: entry.canopySpread ? parseFloat(entry.canopySpread) : undefined,
+    lastYield: entry.lastYield ? parseFloat(entry.lastYield) : undefined,
+    missedSprayings: 0,
   });
 
   const handleSubmit = async () => {
@@ -433,7 +502,6 @@ export function AddTreeModal({
     if (mode === "single") {
       if (!singleEntry.type.trim()) return setError("Tree type is required");
       if (!singleEntry.variety.trim()) return setError("Variety is required");
-
       try {
         setSubmitting(true);
         await onSubmit(entryToTreeData(singleEntry));
@@ -448,18 +516,13 @@ export function AddTreeModal({
       if (invalid.length > 0) {
         return setError(`${invalid.length} entr${invalid.length === 1 ? "y" : "ies"} missing type or variety`);
       }
-
       try {
         setSubmitting(true);
         const treeDataList = batchEntries.map(entryToTreeData);
-
         if (onBatchSubmit) {
           await onBatchSubmit(treeDataList);
         } else {
-          // Fallback: submit one by one
-          for (const data of treeDataList) {
-            await onSubmit(data);
-          }
+          for (const data of treeDataList) await onSubmit(data);
         }
         onOpenChange(false);
       } catch (err: any) {
@@ -474,25 +537,18 @@ export function AddTreeModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex flex-col sm:max-w-[620px] max-h-[90vh]">
+      <DialogContent className="flex flex-col sm:max-w-[640px] max-h-[90vh]">
         <DialogHeader className="shrink-0">
-          <DialogTitle>
-            {editingTree ? "Edit Tree" : "Add Tree"}
-          </DialogTitle>
+          <DialogTitle>{editingTree ? "Edit Tree" : "Add Tree"}</DialogTitle>
           <DialogDescription>
             {editingTree
               ? `Editing: ${editingTree.tree_name || editingTree.id.slice(0, 8)}`
-              : "Add one or multiple trees at once."}
+              : "Add one or multiple trees at once. Agronomic details improve yield predictions."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Mode tabs — only shown for new trees */}
         {!editingTree && (
-          <Tabs
-            value={mode}
-            onValueChange={(v) => setMode(v as "single" | "batch")}
-            className="shrink-0"
-          >
+          <Tabs value={mode} onValueChange={(v) => setMode(v as "single" | "batch")} className="shrink-0">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="single" className="gap-1.5">
                 <TreeDeciduous className="h-3.5 w-3.5" />
@@ -502,16 +558,13 @@ export function AddTreeModal({
                 <Layers className="h-3.5 w-3.5" />
                 Batch Add
                 {batchEntries.length > 0 && (
-                  <Badge variant="secondary" className="text-xs">
-                    {batchEntries.length}
-                  </Badge>
+                  <Badge variant="secondary" className="text-xs">{batchEntries.length}</Badge>
                 )}
               </TabsTrigger>
             </TabsList>
           </Tabs>
         )}
 
-        {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto min-h-0">
           {(mode === "single" || editingTree) && (
             <div className="py-2">
@@ -526,7 +579,6 @@ export function AddTreeModal({
 
           {mode === "batch" && !editingTree && (
             <div className="space-y-2 py-2">
-              {/* Batch info banner */}
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                 <span>
                   <span className="font-medium text-foreground">{batchEntries.length}</span> trees ·{" "}
@@ -551,14 +603,7 @@ export function AddTreeModal({
                 />
               ))}
 
-              {/* Add another entry */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full border-dashed"
-                onClick={addBatchEntry}
-                disabled={submitting}
-              >
+              <Button variant="outline" size="sm" className="w-full border-dashed" onClick={addBatchEntry} disabled={submitting}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 Add Another Tree
               </Button>
@@ -566,7 +611,6 @@ export function AddTreeModal({
           )}
         </div>
 
-        {/* Error */}
         {error && (
           <div className="shrink-0 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
@@ -574,11 +618,7 @@ export function AddTreeModal({
         )}
 
         <DialogFooter className="shrink-0">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>

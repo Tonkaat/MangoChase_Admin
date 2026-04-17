@@ -21,11 +21,11 @@ export function UserStatsCards({ users, loading }: UserStatsCardsProps) {
 
   const totalUsers = users.length;
   const admins = users.filter((u) => u.role === 'admin').length;
-  const managers = users.filter((u) => u.role === 'manager').length;
+  // const managers = users.filter((u) => u.role === 'manager').length;
   const farmers = users.filter((u) => u.role === 'farmer').length;
-  const pendingVerification = users.filter(
-    (u) => u.role === 'farmer' && u.verificationStatus === 'pending'
-  ).length;
+  // const pendingVerification = users.filter(
+  //   (u) => u.role === 'farmer' && u.verificationStatus === 'pending'
+  // ).length;
 
   const stats = [
     {
@@ -42,13 +42,13 @@ export function UserStatsCards({ users, loading }: UserStatsCardsProps) {
       iconClass: 'text-rose-600',
       bgClass: 'bg-rose-50',
     },
-    {
-      label: 'Managers',
-      value: managers,
-      icon: UserCheck,
-      iconClass: 'text-sky-600',
-      bgClass: 'bg-sky-50',
-    },
+    // {
+    //   label: 'Managers',
+    //   value: managers,
+    //   icon: UserCheck,
+    //   iconClass: 'text-sky-600',
+    //   bgClass: 'bg-sky-50',
+    // },
     {
       label: 'Farmers',
       value: farmers,
@@ -56,17 +56,17 @@ export function UserStatsCards({ users, loading }: UserStatsCardsProps) {
       iconClass: 'text-emerald-600',
       bgClass: 'bg-emerald-50',
     },
-    {
-      label: 'Pending',
-      value: pendingVerification,
-      icon: Clock,
-      iconClass: 'text-amber-600',
-      bgClass: 'bg-amber-50',
-    },
+    // {
+    //   label: 'Pending',
+    //   value: pendingVerification,
+    //   icon: Clock,
+    //   iconClass: 'text-amber-600',
+    //   bgClass: 'bg-amber-50',
+    // },
   ];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {stats.map(({ label, value, icon: Icon, iconClass, bgClass }) => (
         <Card key={label} className="shadow-soft border-0 bg-card">
           <CardContent className="p-4">

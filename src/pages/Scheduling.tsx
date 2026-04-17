@@ -484,7 +484,7 @@ export default function Scheduling() {
           <div>
             <h1 className="font-display text-3xl font-bold">Mango Schedule</h1>
             <p className="text-muted-foreground">
-              Seb's Plans for his ehem ehem... Mango Farm
+              Your farm's daily task planner and weather dashboard
             </p>
           </div>
         </div>
@@ -501,14 +501,14 @@ export default function Scheduling() {
       </header>
 
       {/* AI Banner */}
-      <AIScheduleBanner
+      {/* <AIScheduleBanner
         canGenerate={canGenerate}
         nextAvailableDate={nextAvailableDate}
         isGenerating={isGenerating}
         onGenerate={() => setIsAIDialogOpen(true)}
         lastGeneratedDate={lastGeneratedDate}
         tasksGenerated={lastTasksGenerated}
-      />
+      /> */}
 
       {/* Main Grid */}
       <div className="grid lg:grid-cols-3 gap-6">

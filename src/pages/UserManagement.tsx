@@ -81,20 +81,12 @@ export default function UserManagement() {
               <Users className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h1 className="font-display text-2xl font-bold tracking-tight">User Management</h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+              <h1 className="font-display text-3xl font-bold tracking-tight">User Management</h1>
+              <p className="text-muted-foreground">
                 Manage farm users, roles, and cluster assignments
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Join code hint banner */}
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            New farmers join using their invite code in the mobile app — no manual user creation needed.
-          </span>
         </div>
       </header>
 

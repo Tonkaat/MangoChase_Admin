@@ -13,7 +13,7 @@ export default function Dashboard() {
           <div>
             <h1 className="font-display text-4xl font-bold text-foreground">Mango Shunin</h1>
             <p className="mt-2 max-w-2xl text-muted-foreground">
-              Seb is the best mango farmer in the world and this is his admin dashboard.
+              Your farm's command center: track stats, review tasks, and monitor activity at a glance.
             </p>
           </div>
           <Button variant="mango">

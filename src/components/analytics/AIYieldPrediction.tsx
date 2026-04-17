@@ -1,18 +1,17 @@
 // src/components/analytics/AIYieldPrediction.tsx
-// Drop this component into your Analytics.tsx page
-// Usage: <AIYieldPrediction farmId={farmId} overallStats={overallStats} trees={trees} />
+// Cluster-level yield prediction — one AI call per cluster using pre-aggregated stats.
 
-import { useState, useEffect } from 'react';
-import { Sparkles, TreePine, Droplets, CloudRain, TrendingUp, AlertCircle, Loader2, RefreshCw, ChevronDown, ChevronUp, Thermometer, Wind } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Sparkles, TreePine, Droplets, CloudRain, TrendingUp, AlertCircle,
+  Loader2, RefreshCw, ChevronDown, ChevronUp, Thermometer, Wind,
+  Wheat, FolderTree, Activity, CheckCircle2,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import {
-  collection,
-  getDocs,
-  query,
-  limit,
-} from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import type { OverallStats } from '@/types/analytics.types';
 import { weatherService } from '@/services/weatherService';
@@ -20,18 +19,21 @@ import type { WeatherData } from '@/types/weather.types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface TreeSample {
+interface ClusterStats {
   id: string;
-  healthStatus: string;
-  age?: number;
-  height?: number;          // meters
-  canopySpread?: number;    // meters
-  lastYield?: number;       // kg, last harvest
-  missedSprayings?: number; // count in last 90 days
-  cluster?: string;
+  name: string;
+  treeCount: number;
+  healthyCount: number;
+  warningCount: number;
+  criticalCount: number;
+  avgAge: number;
+  avgHeight: number;
+  avgCanopySpread: number;
+  avgLastYield: number;
+  totalMissedSprayings: number;
+  varieties: string[];
 }
 
-// Internal shape used by the AI prompt — mapped from WeatherData
 interface WeatherSnapshot {
   temp: number;
   humidity: number;
@@ -43,8 +45,11 @@ interface WeatherSnapshot {
   isRaining: boolean;
 }
 
-interface PredictionResult {
-  yieldPercentage: number;      // 0–100 predicted % of max yield
+interface ClusterPrediction {
+  clusterId: string;
+  clusterName: string;
+  treeCount: number;
+  yieldPercentage: number;
   estimatedKgPerTree: number;
   totalEstimatedYield: number;
   confidence: number;
@@ -64,11 +69,10 @@ interface AIYieldPredictionProps {
   farmId: string | null;
   overallStats: OverallStats;
   loading?: boolean;
-  /** WeatherAPI.com location string — defaults to Davao City */
   weatherLocation?: string;
 }
 
-// ─── Map WeatherData → WeatherSnapshot for the AI prompt ─────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function mapWeatherSnapshot(data: WeatherData): WeatherSnapshot {
   return {
@@ -83,76 +87,59 @@ function mapWeatherSnapshot(data: WeatherData): WeatherSnapshot {
   };
 }
 
-// ─── Anthropic API call ───────────────────────────────────────────────────────
+// ─── AI Call ──────────────────────────────────────────────────────────────────
 
-async function callAnthropicForYieldPrediction(
-  trees: TreeSample[],
+async function predictClustersYield(
+  clusters: ClusterStats[],
   weather: WeatherSnapshot,
-  farmStats: OverallStats,
-): Promise<PredictionResult> {
-  const avgAge = trees.length
-    ? Math.round(trees.reduce((a, t) => a + (t.age ?? 7), 0) / trees.length)
-    : 7;
-  const avgHeight = trees.length
-    ? (trees.reduce((a, t) => a + (t.height ?? 4.5), 0) / trees.length).toFixed(1)
-    : '4.5';
-  const avgCanopy = trees.length
-    ? (trees.reduce((a, t) => a + (t.canopySpread ?? 3.5), 0) / trees.length).toFixed(1)
-    : '3.5';
-  const avgHistoricalYield = trees.length
-    ? Math.round(trees.reduce((a, t) => a + (t.lastYield ?? 20), 0) / trees.length)
-    : 20;
-  const totalMissedSprayings = trees.reduce((a, t) => a + (t.missedSprayings ?? 0), 0);
-  const avgMissedSprayings = trees.length ? (totalMissedSprayings / trees.length).toFixed(1) : '0';
-  const healthyPct = farmStats.averageHealth;
-  const totalTrees = farmStats.totalTrees || trees.length;
+): Promise<ClusterPrediction[]> {
+  const clusterSummaries = clusters.map((c, i) => `
+CLUSTER ${i + 1}: "${c.name}"
+  Trees: ${c.treeCount} | Healthy: ${c.healthyCount} | Warning: ${c.warningCount} | Critical: ${c.criticalCount}
+  Avg age: ${c.avgAge} yrs | Avg height: ${c.avgHeight} m | Avg canopy: ${c.avgCanopySpread} m
+  Avg last yield: ${c.avgLastYield > 0 ? c.avgLastYield + ' kg/tree' : 'no data'}
+  Missed sprayings (90d): ${c.totalMissedSprayings}
+  Varieties: ${c.varieties.length > 0 ? c.varieties.join(', ') : 'mixed/unknown'}`
+  ).join('\n');
 
-  const prompt = `You are an expert mango agronomist AI. Analyze the following farm data and predict the yield percentage.
+  const prompt = `You are an expert mango agronomist AI analyzing a Philippine mango farm.
+Predict yield for each cluster based on agronomic data and live weather.
 
-FARM DATA:
-- Total trees: ${totalTrees}
-- Average tree age: ${avgAge} years
-- Average tree height: ${avgHeight} m
-- Average canopy spread: ${avgCanopy} m
-- Average historical yield per tree: ${avgHistoricalYield} kg/tree
-- Average missed sprayings (last 90 days): ${avgMissedSprayings} times
-- Current tree health: ${healthyPct}% healthy
-- Critical/diseased trees: ${100 - healthyPct}%
-
-CURRENT WEATHER (live from WeatherAPI):
+CURRENT WEATHER (live):
 - Temperature: ${weather.temp}°C (feels like ${weather.feelsLike}°C)
 - Humidity: ${weather.humidity}%
 - Precipitation: ${weather.rainfall} mm
-- Wind speed: ${weather.windSpeed} km/h
-- UV index: ${weather.uv}
-- Condition: ${weather.condition}
-- Currently raining: ${weather.isRaining ? 'Yes' : 'No'}
+- Wind: ${weather.windSpeed} km/h | UV: ${weather.uv}
+- Condition: ${weather.condition} | Raining now: ${weather.isRaining ? 'Yes' : 'No'}
 
-SCORING CONTEXT for Philippine mango farming:
-- Ideal temp for mango flowering: 18–24°C (current ${weather.temp}°C)
-- Ideal humidity: 50–70% (current ${weather.humidity}%)
-- UV > 8 risks sunburn on fruits and young leaves
-- Mature mango trees (7–15 yrs) produce best yields
-- Each missed spraying increases disease risk by ~8%
-- Active rain prevents spraying and increases fungal pressure
+SCORING CONTEXT (Philippine mango):
+- Ideal flowering temp: 18–24°C | Ideal humidity: 50–70%
+- UV > 8 risks sunburn | Mature trees (7–15 yr) yield best
+- Each missed spraying ≈ +8% disease pressure
 - Max potential yield: 25 kg/tree for healthy mature trees
+- No lastYield data → use health + size to estimate baseline
 
-Respond ONLY with a valid JSON object (no markdown, no explanation):
-{
-  "yieldPercentage": <0-100 integer, % of maximum potential yield expected>,
-  "estimatedKgPerTree": <number>,
-  "confidence": <0-100 integer>,
-  "riskFactors": [<up to 4 specific risk factor strings>],
-  "positiveFactors": [<up to 3 positive factor strings>],
-  "recommendation": "<one actionable sentence for the farmer>",
-  "breakdown": {
-    "healthScore": <0-100>,
-    "sizeScore": <0-100>,
-    "historicalScore": <0-100>,
-    "sprayingScore": <0-100>,
-    "weatherScore": <0-100>
+${clusterSummaries}
+
+Respond ONLY with a valid JSON array — one object per cluster, same order as above, no markdown:
+[
+  {
+    "clusterName": "<exact name>",
+    "yieldPercentage": <0-100>,
+    "estimatedKgPerTree": <number, 1 decimal>,
+    "confidence": <0-100>,
+    "riskFactors": [<up to 4 strings>],
+    "positiveFactors": [<up to 3 strings>],
+    "recommendation": "<one actionable sentence>",
+    "breakdown": {
+      "healthScore": <0-100>,
+      "sizeScore": <0-100>,
+      "historicalScore": <0-100>,
+      "sprayingScore": <0-100>,
+      "weatherScore": <0-100>
+    }
   }
-}`;
+]`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -166,133 +153,258 @@ Respond ONLY with a valid JSON object (no markdown, no explanation):
 
   const data = await response.json();
   const rawText = data.content?.map((b: any) => b.text || '').join('') ?? '';
-
-  // Strip possible markdown fences
   const clean = rawText.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(clean) as Omit<PredictionResult, 'totalEstimatedYield'>;
+  const parsed = JSON.parse(clean) as any[];
 
-  return {
-    ...parsed,
-    totalEstimatedYield: Math.round(parsed.estimatedKgPerTree * totalTrees),
-  };
+  return clusters.map((cluster, i) => {
+    const p = parsed[i] ?? {};
+    return {
+      clusterId: cluster.id,
+      clusterName: cluster.name,
+      treeCount: cluster.treeCount,
+      yieldPercentage: p.yieldPercentage ?? 0,
+      estimatedKgPerTree: p.estimatedKgPerTree ?? 0,
+      totalEstimatedYield: Math.round((p.estimatedKgPerTree ?? 0) * cluster.treeCount),
+      confidence: p.confidence ?? 0,
+      riskFactors: p.riskFactors ?? [],
+      positiveFactors: p.positiveFactors ?? [],
+      recommendation: p.recommendation ?? '',
+      breakdown: p.breakdown ?? { healthScore: 0, sizeScore: 0, historicalScore: 0, sprayingScore: 0, weatherScore: 0 },
+    };
+  });
 }
 
-// ─── Score bar sub-component ──────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ScoreBar({ label, score, icon: Icon, color }: { label: string; score: number; icon: any; color: string }) {
+function ScoreBar({ label, score, icon: Icon, color }: {
+  label: string; score: number; icon: any; color: string;
+}) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
+          <Icon className="h-3.5 w-3.5" />{label}
         </span>
         <span className="font-semibold tabular-nums">{score}%</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn('h-full rounded-full transition-all duration-700', color)}
-          style={{ width: `${score}%` }}
-        />
+        <div className={cn('h-full rounded-full transition-all duration-700', color)} style={{ width: `${score}%` }} />
       </div>
+    </div>
+  );
+}
+
+function YieldBadge({ pct }: { pct: number }) {
+  if (pct >= 75) return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">{pct}%</Badge>;
+  if (pct >= 50) return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">{pct}%</Badge>;
+  return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">{pct}%</Badge>;
+}
+
+function ClusterCard({ pred, expanded, onToggle }: {
+  pred: ClusterPrediction;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const pct = pred.yieldPercentage;
+  const barColor = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
+  const ringColor = pct >= 75 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-600';
+
+  const totalDisplay = pred.totalEstimatedYield >= 1000
+    ? `${(pred.totalEstimatedYield / 1000).toFixed(1)}t`
+    : `${pred.totalEstimatedYield}kg`;
+
+  return (
+    <div className="rounded-xl border border-border/60 overflow-hidden transition-all">
+      {/* Header row */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors text-left"
+      >
+        {/* Cluster name + tree count */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <FolderTree className="h-4 w-4 text-primary shrink-0" />
+            <p className="font-semibold text-sm truncate">{pred.clusterName}</p>
+            <span className="text-xs text-muted-foreground shrink-0">· {pred.treeCount} trees</span>
+          </div>
+          {/* Mini progress bar */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className={cn('h-full rounded-full transition-all duration-700', barColor)} style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+
+        {/* Quick stats */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <p className={cn('text-xl font-black tabular-nums', ringColor)}>{pct}%</p>
+            <p className="text-[10px] text-muted-foreground">{totalDisplay} est.</p>
+          </div>
+          <div className="text-muted-foreground">
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </div>
+        </div>
+      </button>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="border-t border-border/40 p-4 space-y-4 bg-muted/10">
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg bg-background border border-border/40 p-2.5 text-center">
+              <p className="text-base font-bold tabular-nums">{pred.estimatedKgPerTree}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">kg/tree</p>
+            </div>
+            <div className="rounded-lg bg-background border border-border/40 p-2.5 text-center">
+              <p className="text-base font-bold tabular-nums">{totalDisplay}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">total</p>
+            </div>
+            <div className="rounded-lg bg-background border border-border/40 p-2.5 text-center">
+              <p className="text-base font-bold tabular-nums">{pred.confidence}%</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">confidence</p>
+            </div>
+          </div>
+
+          {/* AI recommendation */}
+          {pred.recommendation && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <Sparkles className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+              <p className="text-xs text-foreground leading-relaxed">{pred.recommendation}</p>
+            </div>
+          )}
+
+          {/* Risk + Positive factors */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {pred.riskFactors.length > 0 && (
+              <div className="rounded-lg border border-red-200/60 bg-red-50/50 dark:border-red-900/30 dark:bg-red-900/10 p-3">
+                <p className="mb-2 text-[11px] font-semibold text-red-700 dark:text-red-400 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />Risk Factors
+                </p>
+                <ul className="space-y-1">
+                  {pred.riskFactors.map((r, i) => (
+                    <li key={i} className="text-[11px] text-red-700 dark:text-red-300 flex items-start gap-1.5">
+                      <span className="mt-1 h-1 w-1 rounded-full bg-red-500 shrink-0" />{r}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {pred.positiveFactors.length > 0 && (
+              <div className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-900/10 p-3">
+                <p className="mb-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />Positive Factors
+                </p>
+                <ul className="space-y-1">
+                  {pred.positiveFactors.map((p, i) => (
+                    <li key={i} className="text-[11px] text-emerald-700 dark:text-emerald-300 flex items-start gap-1.5">
+                      <span className="mt-1 h-1 w-1 rounded-full bg-emerald-500 shrink-0" />{p}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Score breakdown */}
+          <div className="space-y-2.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Parameter Breakdown</p>
+            <ScoreBar label="Tree health" score={pred.breakdown.healthScore} icon={Activity}
+              color={pred.breakdown.healthScore >= 70 ? 'bg-emerald-500' : pred.breakdown.healthScore >= 50 ? 'bg-amber-500' : 'bg-red-500'} />
+            <ScoreBar label="Size & age" score={pred.breakdown.sizeScore} icon={TreePine} color="bg-primary" />
+            <ScoreBar label="Historical yield" score={pred.breakdown.historicalScore} icon={TrendingUp} color="bg-blue-500" />
+            <ScoreBar label="Spraying compliance" score={pred.breakdown.sprayingScore} icon={Droplets}
+              color={pred.breakdown.sprayingScore >= 70 ? 'bg-emerald-500' : 'bg-amber-500'} />
+            <ScoreBar label="Weather" score={pred.breakdown.weatherScore} icon={CloudRain} color="bg-sky-500" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function AIYieldPrediction({ farmId, overallStats, loading: parentLoading, weatherLocation = 'Davao City' }: AIYieldPredictionProps) {
-  const [trees, setTrees] = useState<TreeSample[]>([]);
+export function AIYieldPrediction({
+  farmId,
+  overallStats,
+  loading: parentLoading,
+  weatherLocation = 'Davao City',
+}: AIYieldPredictionProps) {
+  const [clusters, setClusters] = useState<ClusterStats[]>([]);
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [weatherRaw, setWeatherRaw] = useState<WeatherData | null>(null);
-  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [predictions, setPredictions] = useState<ClusterPrediction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [expandedCluster, setExpandedCluster] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Fetch tree data from Firestore
-  const loadTrees = async (): Promise<TreeSample[]> => {
+  // Summary totals across clusters
+  const totalEstimatedYield = predictions.reduce((s, p) => s + p.totalEstimatedYield, 0);
+  const avgYieldPct = predictions.length
+    ? Math.round(predictions.reduce((s, p) => s + p.yieldPercentage, 0) / predictions.length)
+    : 0;
+  const avgConfidence = predictions.length
+    ? Math.round(predictions.reduce((s, p) => s + p.confidence, 0) / predictions.length)
+    : 0;
+
+  const loadClusters = async (): Promise<ClusterStats[]> => {
     if (!farmId) return [];
-    try {
-      const snap = await getDocs(
-        query(collection(db, 'farms', farmId, 'trees'), limit(200))
-      );
-      return snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          healthStatus: data.healthStatus ?? 'healthy',
-          age: data.age ?? data.ageYears ?? 7,
-          height: data.height ?? data.heightMeters ?? 4.5,
-          canopySpread: data.canopySpread ?? data.canopy ?? 3.5,
-          lastYield: data.lastYield ?? data.previousYield ?? 20,
-          missedSprayings: data.missedSprayings ?? 0,
-          cluster: data.cluster,
-        };
-      });
-    } catch {
-      return [];
-    }
+    const snap = await getDocs(query(collection(db, 'farms', farmId, 'clusters'), orderBy('name')));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter((c: any) => (c.treeCount ?? 0) > 0); // skip empty clusters
   };
 
-  const runPrediction = async () => {
+  const runPrediction = useCallback(async () => {
     if (!farmId) return;
     setLoading(true);
     setError(null);
 
     try {
-      const [fetchedTrees, fetchedWeatherRaw] = await Promise.all([
-        loadTrees(),
+      const [fetchedClusters, fetchedWeatherRaw] = await Promise.all([
+        loadClusters(),
         weatherService.getCurrentWeather(weatherLocation),
       ]);
 
-      const snapshot = mapWeatherSnapshot(fetchedWeatherRaw);
+      if (fetchedClusters.length === 0) {
+        setError('No clusters with trees found. Add trees to clusters to enable yield prediction.');
+        setLoading(false);
+        return;
+      }
 
-      setTrees(fetchedTrees);
+      const snapshot = mapWeatherSnapshot(fetchedWeatherRaw);
+      setClusters(fetchedClusters);
       setWeatherRaw(fetchedWeatherRaw);
       setWeather(snapshot);
 
-      const result = await callAnthropicForYieldPrediction(fetchedTrees, snapshot, overallStats);
-      setPrediction(result);
+      const results = await predictClustersYield(fetchedClusters, snapshot);
+      setPredictions(results);
       setLastUpdated(new Date());
+
+      // Auto-expand the lowest-yielding cluster as a nudge
+      if (results.length > 0) {
+        const worst = results.reduce((a, b) => a.yieldPercentage < b.yieldPercentage ? a : b);
+        setExpandedCluster(worst.clusterId);
+      }
     } catch (err) {
       console.error('AI prediction error:', err);
       setError('Unable to generate prediction. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [farmId, weatherLocation]);
 
-  // Auto-run on mount when farmId is ready
   useEffect(() => {
-    if (farmId && !parentLoading) {
-      runPrediction();
-    }
+    if (farmId && !parentLoading) runPrediction();
   }, [farmId, parentLoading]);
-
-  // ── Yield gauge color
-  const yieldPct = prediction?.yieldPercentage ?? 0;
-  const gaugeColor =
-    yieldPct >= 75 ? 'text-emerald-600' :
-    yieldPct >= 50 ? 'text-amber-600' :
-    'text-red-600';
-  const gaugeBarColor =
-    yieldPct >= 75 ? 'bg-emerald-500' :
-    yieldPct >= 50 ? 'bg-amber-500' :
-    'bg-red-500';
-  const gaugeBg =
-    yieldPct >= 75 ? 'from-emerald-500/10 to-transparent border-emerald-500/20' :
-    yieldPct >= 50 ? 'from-amber-500/10 to-transparent border-amber-500/20' :
-    'from-red-500/10 to-transparent border-red-500/20';
 
   if (parentLoading) {
     return (
       <Card className="shadow-soft">
         <CardHeader><Skeleton className="h-6 w-64" /></CardHeader>
         <CardContent className="space-y-4">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
         </CardContent>
       </Card>
     );
@@ -304,13 +416,13 @@ export function AIYieldPrediction({ farmId, overallStats, loading: parentLoading
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-primary/10 p-2.5 flex-shrink-0">
+            <div className="rounded-xl bg-primary/10 p-2.5 shrink-0">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle className="text-base">AI Yield Prediction</CardTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Based on tree size · historical yield · spraying · weather · health
+                Cluster-level · health · size · spraying · weather · history
               </p>
             </div>
           </div>
@@ -319,39 +431,27 @@ export function AIYieldPrediction({ farmId, overallStats, loading: parentLoading
             disabled={loading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
           >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             {loading ? 'Analyzing…' : 'Refresh'}
           </button>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-5">
-        {/* ── Error state ── */}
+        {/* ── Error ── */}
         {error && !loading && (
           <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
-            <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+            <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
             <p className="text-sm text-destructive">{error}</p>
           </div>
         )}
 
         {/* ── Loading skeleton ── */}
         {loading && (
-          <div className="space-y-4 animate-pulse">
-            <div className="flex items-center gap-4">
-              <div className="h-24 w-24 rounded-full bg-muted flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div className="h-8 w-32 rounded bg-muted" />
-                <div className="h-4 w-48 rounded bg-muted" />
-                <div className="h-4 w-40 rounded bg-muted" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              {[1,2,3,4,5].map(i => <div key={i} className="h-6 w-full rounded bg-muted" />)}
-            </div>
+          <div className="space-y-3 animate-pulse">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-16 w-full rounded-xl bg-muted" />
+            ))}
           </div>
         )}
 
@@ -362,189 +462,97 @@ export function AIYieldPrediction({ farmId, overallStats, loading: parentLoading
               <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                 <CloudRain className="h-3 w-3" />
                 {weatherRaw.location.name}, {weatherRaw.location.region} · {weather.condition}
-                {weather.isRaining && <span className="ml-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400">Raining now</span>}
+                {weather.isRaining && (
+                  <span className="ml-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400">
+                    Raining now
+                  </span>
+                )}
               </p>
             )}
             <div className="grid grid-cols-5 gap-2 rounded-xl border border-border/40 bg-muted/30 p-3">
+              {[
+                { icon: Thermometer, value: `${weather.temp}°C`, label: 'Temp', color: 'text-orange-500' },
+                { icon: Droplets, value: `${weather.humidity}%`, label: 'Humidity', color: 'text-blue-500' },
+                { icon: CloudRain, value: `${weather.rainfall}mm`, label: 'Rain', color: 'text-sky-500' },
+                { icon: Wind, value: `${weather.windSpeed}`, label: 'km/h', color: 'text-teal-500' },
+                { icon: Thermometer, value: `${weather.uv}`, label: 'UV', color: 'text-yellow-500' },
+              ].map(({ icon: Icon, value, label, color }) => (
+                <div key={label} className="text-center">
+                  <Icon className={`h-4 w-4 mx-auto mb-0.5 ${color}`} />
+                  <p className="text-sm font-semibold">{value}</p>
+                  <p className="text-[10px] text-muted-foreground">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Farm summary banner ── */}
+        {predictions.length > 0 && !loading && (
+          <div className={cn(
+            'rounded-2xl border bg-gradient-to-br p-4',
+            avgYieldPct >= 75
+              ? 'from-emerald-500/10 to-transparent border-emerald-500/20'
+              : avgYieldPct >= 50
+              ? 'from-amber-500/10 to-transparent border-amber-500/20'
+              : 'from-red-500/10 to-transparent border-red-500/20',
+          )}>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Farm-wide Summary · {predictions.length} cluster{predictions.length !== 1 ? 's' : ''}
+            </p>
+            <div className="grid grid-cols-3 gap-3">
               <div className="text-center">
-                <Thermometer className="h-4 w-4 text-orange-500 mx-auto mb-0.5" />
-                <p className="text-sm font-semibold">{weather.temp}°C</p>
-                <p className="text-[10px] text-muted-foreground">Temp</p>
+                <p className={cn(
+                  'text-3xl font-black tabular-nums',
+                  avgYieldPct >= 75 ? 'text-emerald-600' : avgYieldPct >= 50 ? 'text-amber-600' : 'text-red-600',
+                )}>
+                  {avgYieldPct}%
+                </p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">avg yield</p>
               </div>
               <div className="text-center">
-                <Droplets className="h-4 w-4 text-blue-500 mx-auto mb-0.5" />
-                <p className="text-sm font-semibold">{weather.humidity}%</p>
-                <p className="text-[10px] text-muted-foreground">Humidity</p>
+                <p className="text-3xl font-black tabular-nums">
+                  {totalEstimatedYield >= 1000
+                    ? `${(totalEstimatedYield / 1000).toFixed(1)}t`
+                    : `${totalEstimatedYield}kg`}
+                </p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">total est.</p>
               </div>
               <div className="text-center">
-                <CloudRain className="h-4 w-4 text-sky-500 mx-auto mb-0.5" />
-                <p className="text-sm font-semibold">{weather.rainfall}mm</p>
-                <p className="text-[10px] text-muted-foreground">Rain</p>
-              </div>
-              <div className="text-center">
-                <Wind className="h-4 w-4 text-teal-500 mx-auto mb-0.5" />
-                <p className="text-sm font-semibold">{weather.windSpeed}</p>
-                <p className="text-[10px] text-muted-foreground">km/h</p>
-              </div>
-              <div className="text-center">
-                <Thermometer className="h-4 w-4 text-yellow-500 mx-auto mb-0.5" />
-                <p className="text-sm font-semibold">{weather.uv}</p>
-                <p className="text-[10px] text-muted-foreground">UV</p>
+                <p className="text-3xl font-black tabular-nums">{avgConfidence}%</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">AI confidence</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Main prediction result ── */}
-        {prediction && !loading && (
-          <>
-            {/* Yield percentage + stats */}
-            <div className={cn(
-              'rounded-2xl border bg-gradient-to-br p-5',
-              gaugeBg,
-            )}>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                {/* Big number */}
-                <div className="text-center sm:text-left flex-shrink-0">
-                  <p className={cn('text-6xl font-black tabular-nums leading-none', gaugeColor)}>
-                    {prediction.yieldPercentage}%
-                  </p>
-                  <p className="mt-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                    of max potential yield
-                  </p>
-                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted/50">
-                    <div
-                      className={cn('h-full rounded-full transition-all duration-1000', gaugeBarColor)}
-                      style={{ width: `${prediction.yieldPercentage}%` }}
-                    />
-                  </div>
-                </div>
+        {/* ── Cluster cards ── */}
+        {predictions.length > 0 && !loading && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <FolderTree className="h-3.5 w-3.5" />
+              Per-cluster breakdown — click to expand
+            </p>
+            {predictions
+              .slice()
+              .sort((a, b) => a.yieldPercentage - b.yieldPercentage) // worst first — needs attention
+              .map((pred) => (
+                <ClusterCard
+                  key={pred.clusterId}
+                  pred={pred}
+                  expanded={expandedCluster === pred.clusterId}
+                  onToggle={() => setExpandedCluster(expandedCluster === pred.clusterId ? null : pred.clusterId)}
+                />
+              ))}
+          </div>
+        )}
 
-                {/* Quick stats */}
-                <div className="flex-1 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl bg-background/60 p-3 text-center border border-border/30">
-                    <p className="text-lg font-bold tabular-nums">{prediction.estimatedKgPerTree}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">kg / tree</p>
-                  </div>
-                  <div className="rounded-xl bg-background/60 p-3 text-center border border-border/30">
-                    <p className="text-lg font-bold tabular-nums">
-                      {prediction.totalEstimatedYield >= 1000
-                        ? `${(prediction.totalEstimatedYield / 1000).toFixed(1)}t`
-                        : `${prediction.totalEstimatedYield}kg`}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">total yield</p>
-                  </div>
-                  <div className="rounded-xl bg-background/60 p-3 text-center border border-border/30 col-span-2 sm:col-span-1">
-                    <p className="text-lg font-bold tabular-nums">{prediction.confidence}%</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">AI confidence</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Recommendation */}
-            <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
-              <Sparkles className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-primary mb-0.5">AI Recommendation</p>
-                <p className="text-sm text-foreground leading-relaxed">{prediction.recommendation}</p>
-              </div>
-            </div>
-
-            {/* Risk & positive factors */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              {prediction.riskFactors.length > 0 && (
-                <div className="rounded-xl border border-red-200/60 bg-red-50/50 dark:border-red-900/30 dark:bg-red-900/10 p-4">
-                  <p className="mb-2 text-xs font-semibold text-red-700 dark:text-red-400 flex items-center gap-1.5">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    Risk Factors
-                  </p>
-                  <ul className="space-y-1.5">
-                    {prediction.riskFactors.map((r, i) => (
-                      <li key={i} className="text-xs text-red-700 dark:text-red-300 flex items-start gap-1.5">
-                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-red-500 flex-shrink-0" />
-                        {r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {prediction.positiveFactors.length > 0 && (
-                <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-900/10 p-4">
-                  <p className="mb-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                    <TrendingUp className="h-3.5 w-3.5" />
-                    Positive Factors
-                  </p>
-                  <ul className="space-y-1.5">
-                    {prediction.positiveFactors.map((p, i) => (
-                      <li key={i} className="text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-1.5">
-                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                        {p}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {/* Score breakdown toggle */}
-            <div className="border border-border/40 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setShowBreakdown(!showBreakdown)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
-              >
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <TreePine className="h-4 w-4" />
-                  View parameter breakdown
-                </span>
-                {showBreakdown ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </button>
-
-              {showBreakdown && (
-                <div className="border-t border-border/40 px-4 pb-4 pt-3 space-y-3">
-                  <ScoreBar
-                    label="Tree health"
-                    score={prediction.breakdown.healthScore}
-                    icon={Sparkles}
-                    color={prediction.breakdown.healthScore >= 70 ? 'bg-emerald-500' : prediction.breakdown.healthScore >= 50 ? 'bg-amber-500' : 'bg-red-500'}
-                  />
-                  <ScoreBar
-                    label="Tree size & age"
-                    score={prediction.breakdown.sizeScore}
-                    icon={TreePine}
-                    color="bg-primary"
-                  />
-                  <ScoreBar
-                    label="Historical yield"
-                    score={prediction.breakdown.historicalScore}
-                    icon={TrendingUp}
-                    color="bg-blue-500"
-                  />
-                  <ScoreBar
-                    label="Spraying compliance"
-                    score={prediction.breakdown.sprayingScore}
-                    icon={Droplets}
-                    color={prediction.breakdown.sprayingScore >= 70 ? 'bg-emerald-500' : 'bg-amber-500'}
-                  />
-                  <ScoreBar
-                    label="Weather conditions"
-                    score={prediction.breakdown.weatherScore}
-                    icon={CloudRain}
-                    color="bg-sky-500"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Last updated */}
-            {lastUpdated && (
-              <p className="text-center text-[10px] text-muted-foreground">
-                Last analyzed: {lastUpdated.toLocaleTimeString()} ·{' '}
-                {overallStats.totalTrees} trees · Weather via WeatherAPI · {weatherLocation}
-              </p>
-            )}
-          </>
+        {/* ── Footer ── */}
+        {lastUpdated && (
+          <p className="text-center text-[10px] text-muted-foreground">
+            Last analyzed: {lastUpdated.toLocaleTimeString()} ·{' '}
+            {overallStats.totalTrees} trees · {predictions.length} clusters · Weather via WeatherAPI · {weatherLocation}
+          </p>
         )}
       </CardContent>
     </Card>

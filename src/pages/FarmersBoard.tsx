@@ -28,7 +28,7 @@ export default function FarmersBoard() {
           <div>
             <h1 className="font-display text-3xl font-bold">Mango Board</h1>
             <p className="text-muted-foreground">
-              Seb's favorite place to flex his lo- MANGO trees
+              Your hub for community, trade, and market insights
             </p>
           </div>
         </div>

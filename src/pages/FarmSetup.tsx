@@ -498,13 +498,13 @@ export default function FarmSetup() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b bg-card/80 backdrop-blur-sm">
         <BrandLogo />
-        <button
+        {/* <button
           onClick={handleCancelSetup}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           disabled={isLoading}
         >
           Skip for now
-        </button>
+        </button> */}
       </header>
 
       {/* Progress indicator */}
