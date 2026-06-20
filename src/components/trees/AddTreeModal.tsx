@@ -97,8 +97,7 @@ const DEFAULT_ENTRY = (): FormEntry => ({
 
 const HEALTH_STATUSES: { value: HealthStatus; label: string; color: string }[] = [
   { value: "Healthy", label: "Healthy", color: "text-emerald-600" },
-  { value: "Warning", label: "Warning", color: "text-amber-600" },
-  { value: "Critical", label: "Critical", color: "text-red-600" },
+  { value: "Infected", label: "Infected", color: "text-red-600" },
   { value: "Unknown", label: "Unknown", color: "text-muted-foreground" },
 ];
 

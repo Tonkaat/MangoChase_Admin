@@ -82,8 +82,7 @@ interface FirestoreCluster {
   // ── Stats (pre-aggregated) ──
   treeCount?: number;
   healthyCount?: number;
-  warningCount?: number;
-  criticalCount?: number;
+  infectedCount?: number;
   avgAge?: number;
   avgHeight?: number;
   avgCanopySpread?: number;
@@ -111,7 +110,6 @@ const initialFilters: TreeFilter = {
   healthStatus: "all",
   growthStage: "all",
   cluster: "all",
-  flagged: "all",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -227,9 +225,7 @@ export default function TreeManagement() {
     () => ({
       total: trees.length,
       healthy: trees.filter((t) => t.healthStatus === "Healthy" || t.healthStatus === "healthy").length,
-      warning: trees.filter((t) => t.healthStatus === "Warning" || t.healthStatus === "warning").length,
-      critical: trees.filter((t) => t.healthStatus === "Critical" || t.healthStatus === "critical").length,
-      flagged: trees.filter((t) => t.flagged).length,
+      infected: trees.filter((t) => t.healthStatus === "Infected" || t.healthStatus === "infected").length,
       clusters: clusters.length,
     }),
     [trees, clusters],
@@ -260,8 +256,6 @@ export default function TreeManagement() {
         tree.growthStage?.toLowerCase() !== filters.growthStage.toLowerCase()) return false;
 
       if (filters.cluster !== "all" && tree.cluster !== filters.cluster) return false;
-      if (filters.flagged === "flagged" && !tree.flagged) return false;
-      if (filters.flagged === "unflagged" && tree.flagged) return false;
 
       return true;
     });
@@ -568,21 +562,21 @@ export default function TreeManagement() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm">
+          {/* <Button variant="outline" size="sm">
             <Upload className="mr-2 h-4 w-4" /> Import
           </Button>
           <Button variant="outline" size="sm">
             <Download className="mr-2 h-4 w-4" /> Export
-          </Button>
+          </Button> */}
           {/* ── NEW: Record Harvest button ── */}
-          <Button
+          {/* <Button
             variant="outline"
             size="sm"
             onClick={() => { setHarvestDefaultCluster(undefined); setShowHarvestModal(true); }}
             className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
           >
             <Wheat className="mr-2 h-4 w-4" /> Record Harvest
-          </Button>
+          </Button> */}
           <Button
             variant="outline"
             size="sm"

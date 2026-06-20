@@ -1,6 +1,6 @@
 // src/types/tree.types.ts
 
-export type HealthStatus = 'Healthy' | 'Warning' | 'Critical' | 'Unknown' | 'healthy' | 'warning' | 'critical' | 'unknown';
+export type HealthStatus = 'Healthy' | 'Infected' | 'Unknown' | 'healthy' | 'infected' | 'unknown';
 export type GrowthStage = 'seedling' | 'juvenile' | 'mature' | 'flowering' | 'fruiting' | 'Seedling' | 'Juvenile' | 'Mature' | 'Flowering' | 'Fruiting';
 
 export interface Tree {
@@ -42,7 +42,7 @@ export interface ClusterStats {
   treeCount: number;
   healthyCount: number;
   warningCount: number;
-  criticalCount: number;
+  infectedCount: number;
   avgAge: number;
   avgHeight: number;
   avgCanopySpread: number;
@@ -65,7 +65,7 @@ export interface Cluster {
   treeCount: number;
   healthyCount?: number;
   warningCount?: number;
-  criticalCount?: number;
+  infectedCount?: number;
 
   // ── NEW: Yield prediction fields ──
   avgAge?: number;
@@ -101,15 +101,12 @@ export interface TreeFilter {
   healthStatus: HealthStatus | 'all';
   growthStage: GrowthStage | 'all';
   cluster: string | 'all';
-  flagged: 'all' | 'flagged' | 'unflagged';
 }
 
 export interface TreeStats {
   total: number;
   healthy: number;
-  warning: number;
-  critical: number;
-  flagged: number;
+  infected: number;
   clusters: number;
 }
 
@@ -199,7 +196,7 @@ export function convertFirestoreCluster(data: any, treeCount: number = 0): Clust
     treeCount: data.treeCount ?? treeCount,
     healthyCount: data.healthyCount,
     warningCount: data.warningCount,
-    criticalCount: data.criticalCount,
+    infectedCount: data.infectedCount,
 
     // ── Yield prediction fields ──
     avgAge: data.avgAge,
@@ -249,8 +246,7 @@ export interface ClusterData {
 export function normalizeHealthStatus(status: string): HealthStatus {
   switch (status.toLowerCase()) {
     case 'healthy': return 'Healthy';
-    case 'warning': return 'Warning';
-    case 'critical': return 'Critical';
+    case 'infected': return 'Infected';
     default: return 'Unknown';
   }
 }

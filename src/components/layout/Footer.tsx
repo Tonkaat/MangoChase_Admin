@@ -3,7 +3,7 @@ export function Footer() {
     <footer className="border-t bg-background">
       <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-6 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
         <p>© {new Date().getFullYear()} Mangochase</p>
-        <p className="text-xs">Ligero Farms</p>
+        <p className="text-xs">Beulah Integrated Farms</p>
       </div>
     </footer>
   );

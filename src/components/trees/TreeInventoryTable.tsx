@@ -36,12 +36,10 @@ interface TreeInventoryTableProps {
 
 const healthStatusConfig: Record<HealthStatus, { label: string; className: string }> = {
   healthy: { label: "Healthy", className: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" },
-  warning: { label: "Warning", className: "bg-amber-500/10 text-amber-600 border-amber-500/20" },
-  critical: { label: "Critical", className: "bg-red-500/10 text-red-600 border-red-500/20" },
+  infected: { label: "Infected", className: "bg-red-500/10 text-red-600 border-red-500/20" },
   unknown: { label: "Unknown", className: "bg-muted text-muted-foreground border-muted" },
   Healthy: { label: "Healthy", className: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" },
-  Warning: { label: "Warning", className: "bg-amber-500/10 text-amber-600 border-amber-500/20" },
-  Critical: { label: "Critical", className: "bg-red-500/10 text-red-600 border-red-500/20" },
+  Infected: { label: "Infected", className: "bg-red-500/10 text-red-600 border-red-500/20" },
   Unknown: { label: "Unknown", className: "bg-muted text-muted-foreground border-muted" },
 };
 
@@ -139,10 +137,7 @@ export function TreeInventoryTable({
               return (
                 <TableRow
                   key={tree.id}
-                  className={cn(
-                    "cursor-pointer transition-colors hover:bg-muted/50",
-                    tree.flagged && "bg-destructive/5 hover:bg-destructive/10"
-                  )}
+                  className="cursor-pointer transition-colors hover:bg-muted/50"
                   onClick={() => onViewTree(tree)}
                 >
                   <TableCell className="sticky left-0 bg-card z-10" onClick={(e) => e.stopPropagation()}>
@@ -152,10 +147,7 @@ export function TreeInventoryTable({
                     />
                   </TableCell>
                   <TableCell className="font-mono text-sm">
-                    <div className="flex items-center gap-2">
-                      {tree.flagged && <Flag className="h-3 w-3 text-destructive fill-destructive shrink-0" />}
-                      <span className="truncate max-w-[100px]">{tree.id.slice(0, 8)}</span>
-                    </div>
+                    <span className="truncate max-w-[100px]">{tree.id.slice(0, 8)}</span>
                   </TableCell>
                   <TableCell>
                     <div>

@@ -17,11 +17,6 @@ import {
   AlertTriangle,
   Activity,
   FolderTree,
-  Flag,
-  Sprout,
-  TreeDeciduous,
-  Flower,
-  Apple,
   SlidersHorizontal,
 } from "lucide-react";
 import { useState } from "react";
@@ -41,8 +36,7 @@ interface TreeFiltersProps {
 const HEALTH_OPTIONS = [
   { value: "all", label: "All Health", icon: null },
   { value: "Healthy", label: "Healthy", icon: <Heart className="h-3 w-3" />, color: "text-emerald-600" },
-  { value: "Warning", label: "Warning", icon: <AlertTriangle className="h-3 w-3" />, color: "text-amber-600" },
-  { value: "Critical", label: "Critical", icon: <AlertTriangle className="h-3 w-3" />, color: "text-red-600" },
+  { value: "Infected", label: "Infected", icon: <AlertTriangle className="h-3 w-3" />, color: "text-red-600" },
   { value: "Unknown", label: "Unknown", icon: <Activity className="h-3 w-3" />, color: "text-muted-foreground" },
 ];
 
@@ -67,15 +61,13 @@ export function TreeFilters({
     filters.healthStatus !== "all",
     filters.growthStage !== "all",
     filters.cluster !== "all",
-    filters.flagged !== "all",
   ].filter(Boolean).length;
 
   const hasActiveFilters =
     filters.search ||
     filters.healthStatus !== "all" ||
     filters.growthStage !== "all" ||
-    filters.cluster !== "all" ||
-    filters.flagged !== "all";
+    filters.cluster !== "all";
 
   return (
     <div className="space-y-3">
@@ -209,30 +201,6 @@ export function TreeFilters({
                       {cluster}
                     </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Flagged */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Flag Status</label>
-              <Select
-                value={filters.flagged}
-                onValueChange={(value) =>
-                  onFiltersChange({ ...filters, flagged: value as "all" | "flagged" | "unflagged" })
-                }
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="All trees" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Trees</SelectItem>
-                  <SelectItem value="flagged">
-                    <span className="flex items-center gap-1.5">
-                      <Flag className="h-3 w-3 text-destructive" /> Flagged Only
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="unflagged">Unflagged Only</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -44,13 +44,8 @@ const healthStatusConfig: Record<
     className: "bg-brand-leaf/20 text-brand-leaf",
     icon: <Leaf className="h-4 w-4" />,
   },
-  Warning: {
-    label: "Warning",
-    className: "bg-brand-mango/20 text-brand-mango",
-    icon: <AlertTriangle className="h-4 w-4" />,
-  },
-  Critical: {
-    label: "Critical",
+  Infected: {
+    label: "Infected",
     className: "bg-destructive/20 text-destructive",
     icon: <AlertTriangle className="h-4 w-4" />,
   },
@@ -65,13 +60,8 @@ const healthStatusConfig: Record<
     className: "bg-brand-leaf/20 text-brand-leaf",
     icon: <Leaf className="h-4 w-4" />,
   },
-  warning: {
-    label: "Warning",
-    className: "bg-brand-mango/20 text-brand-mango",
-    icon: <AlertTriangle className="h-4 w-4" />,
-  },
-  critical: {
-    label: "Critical",
+  infected: {
+    label: "Infected",
     className: "bg-destructive/20 text-destructive",
     icon: <AlertTriangle className="h-4 w-4" />,
   },

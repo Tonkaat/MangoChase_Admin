@@ -30,11 +30,11 @@ import { cn } from "@/lib/utils";
 const nav = [
   { title: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { title: "Trees", to: "/trees", icon: Trees },
-  { title: "Farmer's Board", to: "/board", icon: MessageSquareMore },
+  // { title: "Farmer's Board", to: "/board", icon: MessageSquareMore },
   { title: "Users", to: "/users", icon: Users },
-  { title: "Scheduling", to: "/scheduling", icon: CalendarClock },
+  // { title: "Scheduling", to: "/scheduling", icon: CalendarClock },
   { title: "Analytics", to: "/analytics", icon: BarChart3 },
-  { title: "Journal", to: "/journal", icon: BookOpen },
+  // { title: "Journal", to: "/journal", icon: BookOpen },
   { title: "Settings", to: "/settings", icon: Settings },
 ];
 

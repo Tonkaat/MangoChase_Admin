@@ -347,8 +347,8 @@ export class TreeService {
         createdAt: serverTimestamp(),
         treeCount: 0,
         healthyCount: 0,
-        warningCount: 0,
-        criticalCount: 0,
+        infectedCount: 0,
+        avgInfectionRate: 0, 
         avgAge: 0,
         avgHeight: 0,
         avgCanopySpread: 0,
@@ -655,8 +655,7 @@ export class TreeService {
           await updateDoc(clusterRef, {
             treeCount: 0,
             healthyCount: 0,
-            warningCount: 0,
-            criticalCount: 0,
+            infectedCount: 0,
             avgAge: 0,
             avgHeight: 0,
             avgCanopySpread: 0,
@@ -671,8 +670,7 @@ export class TreeService {
 
       // Health counts
       let healthyCount = 0;
-      let warningCount = 0;
-      let criticalCount = 0;
+      let infectedCount = 0;
 
       // Agronomic sums (for averaging, only count trees that have the field)
       let ageSum = 0; let ageCount = 0;
@@ -685,8 +683,7 @@ export class TreeService {
       for (const tree of trees) {
         const hs = (tree.healthStatus || '').toLowerCase();
         if (hs === 'healthy') healthyCount++;
-        else if (hs === 'warning') warningCount++;
-        else if (hs === 'critical') criticalCount++;
+        else if (hs === 'infected') infectedCount++;
 
         // Age: prefer stored `age`, else compute from plantedDate
         if (tree.age != null) {
@@ -707,8 +704,8 @@ export class TreeService {
       const stats = {
         treeCount: total,
         healthyCount,
-        warningCount,
-        criticalCount,
+        infectedCount,
+        avgInfectionRate: Math.round((infectedCount / total) * 1000) / 1000,  // ← add this line
         avgAge: ageCount > 0 ? Math.round((ageSum / ageCount) * 10) / 10 : 0,
         avgHeight: heightCount > 0 ? Math.round((heightSum / heightCount) * 10) / 10 : 0,
         avgCanopySpread: canopyCount > 0 ? Math.round((canopySum / canopyCount) * 10) / 10 : 0,

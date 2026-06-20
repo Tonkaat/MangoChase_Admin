@@ -12,15 +12,14 @@ import { ClusterPerformanceTable } from '@/components/analytics/ClusterPerforman
 import { DiseaseFrequencyChart } from '@/components/analytics/DiseaseFrequencyChart';
 import { HealthDistributionChart } from '@/components/analytics/HealthDistributionChart';
 import { PredictionInsightCard } from '@/components/analytics/PredictionInsightCard';
-import { AIYieldPrediction } from '@/components/analytics/AIYieldPrediction'; // ← ADD THIS IMPORT
+import { YieldEstimation } from '@/components/analytics/YieldEstimation'; // ← ADD THIS IMPORT
 import { downloadTextFile } from '@/utils/exportHelpers';
 import { firebaseService } from '@/services/firebase';
 
 export default function Analytics() {
   const [farmId, setFarmId] = useState<string | null>(null);
   const [farmLoading, setFarmLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let isMounted = true;
 
@@ -146,13 +145,9 @@ export default function Analytics() {
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="font-display text-3xl font-bold">Mango Analytics</h1>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
-                <Sparkles className="h-3 w-3" />
-                AI-powered forecasting
-              </span>
             </div>
             <p className="text-muted-foreground">
-              Live farm intelligence · yield predictions · disease risk analysis
+              Live farm intelligence · Yield estimations · Disease risk analysis
             </p>
           </div>
         </div>
@@ -165,13 +160,13 @@ export default function Analytics() {
       <AnalyticsOverview stats={overallStats} loading={analyticsLoading} />
 
       {/* ── Prediction insight banner ── */}
-      <PredictionInsightCard
+      {/* <PredictionInsightCard
         loading={analyticsLoading}
         predictionConfidence={predictionConfidence}
         forecastTrend={forecastTrend}
         overallStats={overallStats}
         diseaseFrequency={diseaseFrequency}
-      />
+      /> */}
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       {/* ← ADD THIS BLOCK — AI Yield Prediction (new multi-parameter model) */}
@@ -187,7 +182,7 @@ export default function Analytics() {
             predictionConfidence={predictionConfidence}
             forecastTrend={forecastTrend}
           /> */}
-        <AIYieldPrediction
+        <YieldEstimation
           farmId={farmId}
           overallStats={overallStats}
           loading={analyticsLoading}

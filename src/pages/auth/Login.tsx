@@ -117,7 +117,7 @@ export default function Login() {
                 </Button>
               </form>
 
-              <div className="relative">
+              {/* <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
                 </div>
@@ -138,7 +138,7 @@ export default function Login() {
                   <Chrome className="mr-2 h-4 w-4" />
                 )}
                 Sign in with Google
-              </Button>
+              </Button> */}
 
               <div className="flex items-center justify-between text-sm">
                 <Link className="text-primary underline-offset-4 hover:underline" to="/forgot-password">

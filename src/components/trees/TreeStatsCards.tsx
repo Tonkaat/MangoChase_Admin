@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TreeStats } from "@/types/tree.types";
-import { TreeDeciduous, Heart, AlertTriangle, Flag, FolderTree } from "lucide-react";
+import { TreeDeciduous, Heart, AlertTriangle, FolderTree } from "lucide-react";
 
 interface TreeStatsCardsProps {
   stats: TreeStats;
@@ -23,23 +23,9 @@ export function TreeStatsCards({ stats }: TreeStatsCardsProps) {
       bg: "bg-brand-leaf/10",
     },
     {
-      label: "Warning",
-      value: stats.warning,
+      label: "Infected",
+      value: stats.infected,
       icon: AlertTriangle,
-      color: "text-brand-mango",
-      bg: "bg-brand-mango/10",
-    },
-    {
-      label: "Critical",
-      value: stats.critical,
-      icon: AlertTriangle,
-      color: "text-destructive",
-      bg: "bg-destructive/10",
-    },
-    {
-      label: "Flagged",
-      value: stats.flagged,
-      icon: Flag,
       color: "text-destructive",
       bg: "bg-destructive/10",
     },
@@ -53,7 +39,7 @@ export function TreeStatsCards({ stats }: TreeStatsCardsProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {items.map((item) => (
         <Card key={item.label} className="shadow-soft">
           <CardContent className="flex items-center gap-3 p-4">

@@ -95,7 +95,7 @@ export default function UserManagement() {
 
       {/* Tabs */}
       <Tabs defaultValue="accounts" className="space-y-6">
-        <TabsList className="h-9 gap-1 p-1">
+        {/* <TabsList className="h-9 gap-1 p-1">
           <TabsTrigger value="accounts" className="h-7 gap-1.5 px-3 text-xs">
             <Users className="h-3.5 w-3.5" />
             Accounts
@@ -108,7 +108,7 @@ export default function UserManagement() {
             <Activity className="h-3.5 w-3.5" />
             Activity
           </TabsTrigger>
-        </TabsList>
+        </TabsList> */}
 
         <TabsContent value="accounts">
           <UserTable

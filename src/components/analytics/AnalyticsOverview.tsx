@@ -11,17 +11,17 @@ interface AnalyticsOverviewProps {
 const statCards = [
   { key: 'totalFarms', label: 'Total Farms', icon: Leaf, format: (v: number) => v.toString() },
   { key: 'totalTrees', label: 'Total Trees', icon: Trees, format: (v: number) => v.toLocaleString() },
-  { key: 'totalYield', label: 'Total Yield (kg)', icon: TrendingUp, format: (v: number) => v.toLocaleString() },
+  // { key: 'totalYield', label: 'Total Yield (kg)', icon: TrendingUp, format: (v: number) => v.toLocaleString() },
   { key: 'averageHealth', label: 'Avg Health', icon: Heart, format: (v: number) => `${v}%` },
   { key: 'activeFarmers', label: 'Active Farmers', icon: Users, format: (v: number) => v.toString() },
-  { key: 'pendingTasks', label: 'Pending Tasks', icon: ClipboardList, format: (v: number) => v.toString() },
+  // { key: 'pendingTasks', label: 'Pending Tasks', icon: ClipboardList, format: (v: number) => v.toString() },
 ] as const;
 
 export function AnalyticsOverview({ stats, loading }: AnalyticsOverviewProps) {
   if (loading) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {[...Array(6)].map((_, i) => (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
           <Skeleton key={i} className="h-24 w-full" />
         ))}
       </div>
@@ -29,7 +29,7 @@ export function AnalyticsOverview({ stats, loading }: AnalyticsOverviewProps) {
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {statCards.map(({ key, label, icon: Icon, format }) => (
         <Card key={key} className="shadow-soft">
           <CardContent className="p-4">
