@@ -213,7 +213,7 @@ export default function FarmSetup() {
         // Add default single variety
         const defaultVariety: VarietyConfig = {
           id: uuidv4(),
-          name: data.cropType === "mango" ? "Carabao" : "Default",
+          name: "Carabao",
           quantity: data.numberOfTrees
         };
         updateField("varieties", [defaultVariety]);

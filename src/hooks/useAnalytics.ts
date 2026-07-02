@@ -322,12 +322,12 @@ export function useAnalytics(farmId?: string | null, filters?: AnalyticsFilters)
           percentage: totalTrees > 0 ? Math.round((healthyTrees / totalTrees) * 100) : 0,
         },
         {
-          status: 'warning',
+          status: 'infected',
           count: warningTrees,
           percentage: totalTrees > 0 ? Math.round((warningTrees / totalTrees) * 100) : 0,
         },
         {
-          status: 'critical',
+          status: 'unknown',
           count: criticalTrees,
           percentage: totalTrees > 0 ? Math.round((criticalTrees / totalTrees) * 100) : 0,
         },

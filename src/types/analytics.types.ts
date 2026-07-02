@@ -47,7 +47,7 @@ export interface ClusterPerformance {
 }
 
 export interface HealthDistribution {
-  status: 'healthy' | 'warning' | 'critical';
+  status: 'healthy' | 'infected' | 'unknown';
   count: number;
   percentage: number;
 }

@@ -41,7 +41,7 @@ export interface Tree {
 export interface ClusterStats {
   treeCount: number;
   healthyCount: number;
-  warningCount: number;
+  unknownCount: number;
   infectedCount: number;
   avgAge: number;
   avgHeight: number;
@@ -64,7 +64,7 @@ export interface Cluster {
   // Statistics (pre-aggregated in Firestore, computed client-side as fallback)
   treeCount: number;
   healthyCount?: number;
-  warningCount?: number;
+  unknownCount?: number;
   infectedCount?: number;
 
   // ── NEW: Yield prediction fields ──
@@ -195,7 +195,7 @@ export function convertFirestoreCluster(data: any, treeCount: number = 0): Clust
 
     treeCount: data.treeCount ?? treeCount,
     healthyCount: data.healthyCount,
-    warningCount: data.warningCount,
+    unknownCount: data.unknownCount ?? data.warningCount,
     infectedCount: data.infectedCount,
 
     // ── Yield prediction fields ──

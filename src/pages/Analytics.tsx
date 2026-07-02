@@ -44,7 +44,7 @@ import { ClusterPerformanceTable } from '@/components/analytics/ClusterPerforman
 import { DiseaseFrequencyChart } from '@/components/analytics/DiseaseFrequencyChart';
 import { HealthDistributionChart } from '@/components/analytics/HealthDistributionChart';
 import { YieldEstimation, buildClusterRawData } from '@/components/analytics/YieldEstimation';
-import { downloadTextFile } from '@/utils/exportHelpers';
+import { downloadTextFile, generateAnalyticsPDF } from '@/utils/exportHelpers';
 import { firebaseService } from '@/services/firebase';
 import { farmService } from '@/services/firebase/farmService';
 import { weatherService } from '@/services/weatherService';
@@ -172,7 +172,7 @@ export default function Analytics() {
     ),
   );
 
-  const handleExport = (format: 'csv' | 'pdf') => {
+const handleExport = async (format: 'csv' | 'pdf') => {
     if (format === 'csv') {
       const headers = ['Period', 'Estimated Yield (kg)'];
       const rows = yieldTrends.map((t) => [t.period, t.yield ?? ''].join(','));
@@ -180,7 +180,14 @@ export default function Analytics() {
       downloadTextFile('analytics-yield-trends.csv', csv);
       toast.success('CSV exported successfully');
     } else {
-      toast.info('PDF export coming soon! Use CSV for now.');
+      try {
+        toast.loading('Generating PDF report...', { id: 'pdf-export' });
+        await generateAnalyticsPDF({ overallStats, healthDistribution, clusterPerformance });
+        toast.success('PDF report generated', { id: 'pdf-export' });
+      } catch (err) {
+        console.error('❌ Analytics: PDF generation failed', err);
+        toast.error('Failed to generate PDF report', { id: 'pdf-export' });
+      }
     }
   };
 
@@ -262,7 +269,7 @@ export default function Analytics() {
       <ClusterPerformanceTable data={clusterPerformance} loading={analyticsLoading} />
 
       {/* ── Disease frequency ── */}
-      <DiseaseFrequencyChart data={diseaseFrequency} loading={analyticsLoading} />
+      {/* <DiseaseFrequencyChart data={diseaseFrequency} loading={analyticsLoading} /> */}
     </div>
   );
 }
