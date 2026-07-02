@@ -1,158 +1,191 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Notification, NotificationFilters, NotificationStats } from '@/types/notification.types';
+// src/hooks/useNotifications.ts
 
-const generateMockNotifications = (): Notification[] => {
-  return [
-    {
-      id: 'n1',
-      type: 'disease_alert',
-      title: 'Critical Disease Alert',
-      message: 'Anthracnose outbreak detected in North Orchard. Immediate action required.',
-      createdAt: new Date(Date.now() - 30 * 60 * 1000),
-      isRead: false,
-      priority: 'urgent',
-      actionUrl: '/journal',
-      actionLabel: 'View Details',
-      metadata: { farmId: 'f1' },
-    },
-    {
-      id: 'n2',
-      type: 'task_reminder',
-      title: 'Task Due Today',
-      message: 'Fertilizer application for South Orchard is scheduled for today.',
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      isRead: false,
-      priority: 'high',
-      actionUrl: '/scheduling',
-      actionLabel: 'View Task',
-    },
-    {
-      id: 'n3',
-      type: 'verification_update',
-      title: 'Farmer Verification Approved',
-      message: 'Juan dela Cruz has been verified as a Trusted farmer.',
-      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
-      isRead: true,
-      priority: 'medium',
-      actionUrl: '/users',
-      actionLabel: 'View Profile',
-      metadata: { userId: 'u2' },
-    },
-    {
-      id: 'n4',
-      type: 'trade_listing',
-      title: 'New Trade Listing',
-      message: 'Maria Santos posted 200kg Carabao mangoes available for sale.',
-      createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      isRead: true,
-      priority: 'low',
-      actionUrl: '/board',
-      actionLabel: 'View Listing',
-    },
-    {
-      id: 'n5',
-      type: 'market_price',
-      title: 'Price Update',
-      message: 'Carabao mango prices increased by 15% in Central Luzon region.',
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      isRead: false,
-      priority: 'medium',
-      actionUrl: '/board',
-      actionLabel: 'View Prices',
-    },
-    {
-      id: 'n6',
-      type: 'system',
-      title: 'System Maintenance',
-      message: 'Scheduled maintenance on Sunday, 2:00 AM - 4:00 AM.',
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-      isRead: true,
-      priority: 'low',
-    },
-    {
-      id: 'n7',
-      type: 'mention',
-      title: 'You were mentioned',
-      message: 'Pedro Reyes mentioned you in a community post about pest control.',
-      createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
-      isRead: true,
-      priority: 'medium',
-      actionUrl: '/board',
-      actionLabel: 'View Post',
-    },
-  ];
-};
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  db,
+  collection,
+  doc,
+  updateDoc,
+  deleteDoc,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+  writeBatch,
+  serverTimestamp,
+} from '@/services/firebase/firebaseConfig';
+import { firebaseService } from '@/services/firebase';
+import { initScanNotificationListener } from '@/services/firebase/scanNotificationService';
+import { toast } from 'sonner';
+import type { Notification, NotificationStats } from '@/types/notification.types';
 
-export function useNotifications(filters?: NotificationFilters) {
-  const [loading, setLoading] = useState(true);
+const MAX_NOTIFICATIONS = 100;
+
+function docToNotification(id: string, data: Record<string, any>): Notification {
+  return {
+    id,
+    type: data.type ?? 'system',
+    title: data.title ?? '(no title)',
+    message: data.message ?? '',
+    createdAt: data.createdAt?.toDate?.() ?? new Date(),
+    readAt: data.readAt?.toDate?.() ?? undefined,
+    isRead: data.isRead ?? false,
+    priority: data.priority ?? 'low',
+    actionUrl: data.actionUrl ?? undefined,
+    actionLabel: data.actionLabel ?? undefined,
+    metadata: data.metadata ?? undefined,
+  };
+}
+
+export function useNotifications() {
+  const [farmId, setFarmId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [stats, setStats] = useState<NotificationStats>({ total: 0, unread: 0, urgent: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const scanListenerUnsubscribe = useRef<(() => void) | null>(null);
 
-  const fetchNotifications = useCallback(async () => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-
-    let data = generateMockNotifications();
-
-    if (filters?.type) {
-      data = data.filter((n) => n.type === filters.type);
-    }
-    if (filters?.isRead !== undefined) {
-      data = data.filter((n) => n.isRead === filters.isRead);
-    }
-    if (filters?.priority) {
-      data = data.filter((n) => n.priority === filters.priority);
-    }
-
-    setNotifications(data);
-    setStats({
-      total: data.length,
-      unread: data.filter((n) => !n.isRead).length,
-      urgent: data.filter((n) => n.priority === 'urgent' && !n.isRead).length,
-    });
-    setLoading(false);
-  }, [filters]);
-
+  // ── 1. Resolve farmId ────────────────────────────────────────────────────
   useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+    let mounted = true;
 
-  const markAsRead = async (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isRead: true, readAt: new Date() } : n))
-    );
-    setStats((prev) => ({ ...prev, unread: Math.max(0, prev.unread - 1) }));
-  };
-
-  const markAllAsRead = async () => {
-    setNotifications((prev) =>
-      prev.map((n) => ({ ...n, isRead: true, readAt: new Date() }))
-    );
-    setStats((prev) => ({ ...prev, unread: 0, urgent: 0 }));
-  };
-
-  const deleteNotification = async (id: string) => {
-    const notification = notifications.find((n) => n.id === id);
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-    if (notification && !notification.isRead) {
-      setStats((prev) => ({
-        ...prev,
-        total: prev.total - 1,
-        unread: prev.unread - 1,
-        urgent: notification.priority === 'urgent' ? prev.urgent - 1 : prev.urgent,
-      }));
-    } else {
-      setStats((prev) => ({ ...prev, total: prev.total - 1 }));
+    async function resolveFarm() {
+      try {
+        let id = await firebaseService.getCurrentUserFarmId?.();
+        if (!id) {
+          const user = firebaseService.getCurrentUser?.();
+          if (user) {
+            const farms = await firebaseService.getUserFarms?.(user.uid);
+            if (farms?.length) id = farms[0].farmId;
+          }
+        }
+        if (mounted && id) {
+          setFarmId(id);
+          // Debug: Check scan field
+          const { debugScanField } = await import('@/services/firebase/scanNotificationService');
+          debugScanField(id);
+        }
+      } catch (err) {
+        console.error('useNotifications: could not resolve farmId', err);
+      }
     }
+
+    resolveFarm();
+    return () => { mounted = false; };
+  }, []);
+
+  // ── 2. Real-time notification listener ──────────────────────────────────
+  useEffect(() => {
+    if (!farmId) return;
+
+    setLoading(true);
+
+    const q = query(
+      collection(db, 'farms', farmId, 'notifications'),
+      orderBy('createdAt', 'desc'),
+      limit(MAX_NOTIFICATIONS),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map((d) =>
+          docToNotification(d.id, d.data() as Record<string, any>),
+        );
+        setNotifications(items);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        console.error('useNotifications snapshot error:', err);
+        setError('Failed to load notifications');
+        setLoading(false);
+      },
+    );
+
+    // ── 3. Start scan notification listener ──────────────────────────────
+    // This will create notifications from scans in real-time
+    const scanUnsub = initScanNotificationListener(
+      farmId,
+      (notificationId, disease, treeName) => {
+        // Show toast when a new scan notification is created
+        toast.success(
+          disease.toLowerCase() === 'healthy' 
+            ? `✅ Healthy scan for ${treeName}`
+            : `🚨 Disease detected on ${treeName}`,
+          {
+            description: `New scan notification created`,
+            action: {
+              label: 'View',
+              onClick: () => {
+                // Navigate to notifications
+                window.location.href = '/notifications';
+              },
+            },
+          }
+        );
+      }
+    );
+
+    scanListenerUnsubscribe.current = scanUnsub;
+
+    return () => {
+      unsub();
+      if (scanListenerUnsubscribe.current) {
+        scanListenerUnsubscribe.current();
+        scanListenerUnsubscribe.current = null;
+      }
+    };
+  }, [farmId]);
+
+  // ── 4. Computed stats ────────────────────────────────────────────────────
+  const stats: NotificationStats = {
+    total: notifications.length,
+    unread: notifications.filter((n) => !n.isRead).length,
+    urgent: notifications.filter((n) => n.priority === 'urgent' && !n.isRead).length,
   };
+
+  // ── 5. Actions ───────────────────────────────────────────────────────────
+  const markAsRead = useCallback(
+    async (id: string) => {
+      if (!farmId) return;
+      await updateDoc(doc(db, 'farms', farmId, 'notifications', id), {
+        isRead: true,
+        readAt: serverTimestamp(),
+      });
+    },
+    [farmId],
+  );
+
+  const markAllAsRead = useCallback(async () => {
+    if (!farmId) return;
+    const unread = notifications.filter((n) => !n.isRead);
+    if (!unread.length) return;
+
+    const batch = writeBatch(db);
+    unread.forEach((n) => {
+      batch.update(doc(db, 'farms', farmId, 'notifications', n.id), {
+        isRead: true,
+        readAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }, [farmId, notifications]);
+
+  const deleteNotification = useCallback(
+    async (id: string) => {
+      if (!farmId) return;
+      await deleteDoc(doc(db, 'farms', farmId, 'notifications', id));
+    },
+    [farmId],
+  );
 
   return {
     loading,
+    error,
     notifications,
     stats,
     markAsRead,
     markAllAsRead,
     deleteNotification,
-    refetch: fetchNotifications,
   };
 }

@@ -1,6 +1,7 @@
-// Notification Types
+// src/types/notification.types.ts
+// (replace your existing file with this – only addition is `scanId` in metadata)
 
-export type NotificationType = 
+export type NotificationType =
   | 'disease_alert'
   | 'task_reminder'
   | 'verification_update'
@@ -25,6 +26,7 @@ export interface Notification {
   metadata?: {
     farmId?: string;
     treeId?: string;
+    scanId?: string;   // ← new: links notification back to the scan doc
     userId?: string;
     postId?: string;
   };

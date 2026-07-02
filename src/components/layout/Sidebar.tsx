@@ -32,6 +32,7 @@ const nav = [
   { title: "Trees", to: "/trees", icon: Trees },
   // { title: "Farmer's Board", to: "/board", icon: MessageSquareMore },
   { title: "Users", to: "/users", icon: Users },
+  { title: "Scan Records", to: "/scan-records", icon: BookOpen },
   // { title: "Scheduling", to: "/scheduling", icon: CalendarClock },
   { title: "Analytics", to: "/analytics", icon: BarChart3 },
   // { title: "Journal", to: "/journal", icon: BookOpen },

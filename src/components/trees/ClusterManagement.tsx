@@ -86,33 +86,33 @@ function UserAvatar({ user, size = "sm" }: { user: ClusterUser; size?: "sm" | "x
   );
 }
 
+// Healthy/Infected only — HealthStatus in tree.types.ts is
+// 'Healthy' | 'Infected' | 'Unknown', and TreeService._updateClusterStats
+// only ever writes healthyCount/infectedCount to the cluster doc. There's
+// no three-tier warning/critical breakdown anywhere in the data model, so
+// the bar (and the mini badges below) only need two segments. Whatever
+// isn't healthy or infected (e.g. "Unknown") just shows as empty track.
 function HealthBar({
   healthy,
-  warning,
-  critical,
+  infected,
   total,
 }: {
   healthy: number;
-  warning: number;
-  critical: number;
+  infected: number;
   total: number;
 }) {
   if (total === 0) return null;
 
   const healthyPct = Math.round((healthy / total) * 100);
-  const warningPct = Math.round((warning / total) * 100);
-  const criticalPct = Math.round((critical / total) * 100);
+  const infectedPct = Math.round((infected / total) * 100);
 
   return (
     <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
       {healthyPct > 0 && (
         <div className="h-full bg-emerald-500 transition-all" style={{ width: `${healthyPct}%` }} />
       )}
-      {warningPct > 0 && (
-        <div className="h-full bg-amber-400 transition-all" style={{ width: `${warningPct}%` }} />
-      )}
-      {criticalPct > 0 && (
-        <div className="h-full bg-red-500 transition-all" style={{ width: `${criticalPct}%` }} />
+      {infectedPct > 0 && (
+        <div className="h-full bg-amber-500 transition-all" style={{ width: `${infectedPct}%` }} />
       )}
     </div>
   );
@@ -130,9 +130,8 @@ export function ClusterManagement({
   className,
 }: ClusterManagementProps) {
   const totalTrees = clusters.reduce((acc, c) => acc + c.treeCount, 0);
-  const totalHealthy = clusters.reduce((acc, c) => acc + c.healthyCount, 0);
-  const totalWarning = clusters.reduce((acc, c) => acc + c.warningCount, 0);
-  const totalCritical = clusters.reduce((acc, c) => acc + c.criticalCount, 0);
+  const totalHealthy = clusters.reduce((acc, c) => acc + (c.healthyCount || 0), 0);
+  const totalInfected = clusters.reduce((acc, c) => acc + (c.infectedCount || 0), 0);
 
   return (
     <TooltipProvider>
@@ -186,23 +185,18 @@ export function ClusterManagement({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">All Trees</span>
-                  <Badge
+                  {/* <Badge
                     variant={selectedCluster === null ? "default" : "secondary"}
                     className="text-xs shrink-0"
                   >
                     {totalTrees}
-                  </Badge>
+                  </Badge> */}
                 </div>
-                {totalTrees > 0 && (
+                {/* {totalTrees > 0 && (
                   <div className="mt-1.5">
-                    <HealthBar
-                      healthy={totalHealthy}
-                      warning={totalWarning}
-                      critical={totalCritical}
-                      total={totalTrees}
-                    />
+                    <HealthBar healthy={totalHealthy} infected={totalInfected} total={totalTrees} />
                   </div>
-                )}
+                )} */}
               </div>
             </button>
 
@@ -225,6 +219,11 @@ export function ClusterManagement({
               clusters.map((cluster) => {
                 const isSelected = selectedCluster === cluster.id;
                 const assignedUsers = cluster.assignedUsers ?? [];
+                // Fallback to the single assigned-farmer fields that actually
+                // live on the cluster doc (farmService.getClusters() already
+                // returns these) when no richer assignedUsers list has been
+                // wired up yet.
+                const fallbackFarmerName = cluster.assignedFarmerName;
 
                 return (
                   <div
@@ -258,34 +257,27 @@ export function ClusterManagement({
                       {cluster.treeCount > 0 && (
                         <div className="mt-0.5">
                           <HealthBar
-                            healthy={cluster.healthyCount}
-                            warning={cluster.warningCount}
-                            critical={cluster.criticalCount}
+                            healthy={cluster.healthyCount || 0}
+                            infected={cluster.infectedCount || 0}
                             total={cluster.treeCount}
                           />
                         </div>
                       )}
 
-                      <div className="flex items-center gap-2 text-[11px]">
-                        {cluster.healthyCount > 0 && (
+                      {/* <div className="flex items-center gap-2 text-[11px]">
+                        {(cluster.healthyCount || 0) > 0 && (
                           <span className="flex items-center gap-0.5 text-emerald-600">
                             <Heart className="h-2.5 w-2.5" />
                             {cluster.healthyCount}
                           </span>
                         )}
-                        {cluster.warningCount > 0 && (
+                        {(cluster.infectedCount || 0) > 0 && (
                           <span className="flex items-center gap-0.5 text-amber-600">
                             <AlertTriangle className="h-2.5 w-2.5" />
-                            {cluster.warningCount}
+                            {cluster.infectedCount}
                           </span>
                         )}
-                        {cluster.criticalCount > 0 && (
-                          <span className="flex items-center gap-0.5 text-red-600">
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            {cluster.criticalCount}
-                          </span>
-                        )}
-                      </div>
+                      </div> */}
 
                       {assignedUsers.length > 0 ? (
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -315,6 +307,16 @@ export function ClusterManagement({
                             {assignedUsers.length === 1
                               ? assignedUsers[0].name.split(" ")[0]
                               : `${assignedUsers.length} farmers`}
+                          </span>
+                        </div>
+                      ) : fallbackFarmerName ? (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <UserAvatar
+                            user={{ id: cluster.assignedFarmerId || fallbackFarmerName, name: fallbackFarmerName }}
+                            size="xs"
+                          />
+                          <span className="text-[11px] text-muted-foreground truncate">
+                            {fallbackFarmerName}
                           </span>
                         </div>
                       ) : (

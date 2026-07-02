@@ -555,7 +555,7 @@ export default function TreeManagement() {
             <Trees className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="font-display text-3xl font-bold">Tree Management</h1>
+            <h1 className="font-display text-3xl font-bold">Tree Inventory</h1>
             <p className="text-muted-foreground text-sm">
               {stats.total} trees · {clusters.length} clusters
             </p>
@@ -655,11 +655,7 @@ export default function TreeManagement() {
                 trees={filteredTrees}
                 selectedTrees={selectedTrees}
                 onSelectionChange={setSelectedTrees}
-                onViewTree={handleViewTree}
-                onGenerateQR={handleGenerateQR}
-                onToggleFlag={handleToggleFlag}
-                onDeleteTree={handleDeleteTree}
-                onEditTree={handleEditTree}
+                farmId={farmId}
               />
             </CardContent>
           </Card>

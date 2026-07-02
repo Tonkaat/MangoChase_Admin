@@ -53,6 +53,7 @@ import {
   Sprout, TrendingUp, AlertCircle,
   Loader2, RefreshCw, ChevronDown, ChevronUp,
   FolderTree, Activity, Calculator, Info,
+  CloudSun, Droplets, CloudOff,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -64,7 +65,7 @@ import {
   detectSeasonFromDate,
   type ClusterYieldInput,
   type ClusterYieldResult,
-} from '../../lib/yieldEstimation.engine';
+} from '@/lib/yieldEstimation.engine';
 
 const MAX_YIELD_KG = 25;
 
@@ -97,6 +98,12 @@ interface YieldEstimationProps {
   /** Cluster data to estimate. In production, wire this to your Firestore
    *  cluster stream via `buildClusterRawData` (see bottom of this file). */
   clusters?: ClusterRawData[];
+  /** Live weather reading used for the weather factor — passed through so
+   *  the card can show a visible "Weather used in this calculation" chip
+   *  with real numbers, instead of the factor being an invisible input. */
+  weather?: { location?: { name?: string }; current?: { temp_c?: number; precip_mm?: number; condition?: { text?: string } } } | null;
+  weatherLoading?: boolean;
+  weatherError?: string | null;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -122,6 +129,71 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
   if (confidence >= 55)
     return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">Moderate confidence</Badge>;
   return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">Low confidence</Badge>;
+}
+
+/**
+ * Visible proof that the weather factor in the formula is driven by a real,
+ * live reading — not a hidden constant. Three honest states:
+ *   1. Loading: still fetching from WeatherService.
+ *   2. Loaded: shows the actual temp_c / precip_mm just pulled.
+ *   3. Unavailable: says so plainly (e.g. farm has no location set, or the
+ *      API call failed) — this is also the state where the engine is
+ *      silently using its documented neutral weather fallback, so the chip
+ *      makes that fallback visible instead of hiding it.
+ */
+function WeatherChip({
+  weather,
+  weatherLoading,
+  weatherError,
+}: {
+  weather?: { location?: { name?: string }; current?: { temp_c?: number; precip_mm?: number; condition?: { text?: string } } } | null;
+  weatherLoading?: boolean;
+  weatherError?: string | null;
+}) {
+  if (weatherLoading) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Fetching weather…
+      </span>
+    );
+  }
+
+  const locationName = weather?.location?.name;
+  const temp = weather?.current?.temp_c;
+  const rain = weather?.current?.precip_mm;
+  const hasReading = typeof temp === 'number' && typeof rain === 'number';
+
+  if (!hasReading) {
+    return (
+      <span
+        title={weatherError ?? 'No live weather reading available — calculation uses a neutral weather factor'}
+        className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/60 bg-amber-50/60 px-2.5 py-1 text-xs text-amber-700 dark:border-amber-900/30 dark:bg-amber-900/10 dark:text-amber-400"
+      >
+        <CloudOff className="h-3.5 w-3.5" />
+        {weatherError ?? 'Weather unavailable'}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title="Live weather reading feeding the weather factor in the calculation"
+      className="inline-flex items-center gap-2.5 rounded-full border border-sky-200/60 bg-sky-50/60 px-2.5 py-1 text-xs text-sky-700 dark:border-sky-900/30 dark:bg-sky-900/10 dark:text-sky-400"
+    >
+      {locationName && (
+        <span className="font-medium">{locationName}</span>
+      )}
+      <span className="inline-flex items-center gap-1">
+        <CloudSun className="h-3.5 w-3.5" />
+        {temp.toFixed(1)}°C
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Droplets className="h-3.5 w-3.5" />
+        {rain.toFixed(1)}mm
+      </span>
+    </span>
+  );
 }
 
 interface ClusterCardProps {
@@ -244,6 +316,9 @@ export function YieldEstimation({
   overallStats,
   loading: parentLoading,
   clusters = [],
+  weather = null,
+  weatherLoading = false,
+  weatherError = null,
 }: YieldEstimationProps) {
   const [running, setRunning] = useState(false);
   const [hasRun, setHasRun] = useState(false);
@@ -345,6 +420,9 @@ export function YieldEstimation({
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Rule-based · 4 condition factors · fully transparent calculation
               </p>
+              <div className="mt-2">
+                <WeatherChip weather={weather} weatherLoading={weatherLoading} weatherError={weatherError} />
+              </div>
             </div>
           </div>
 
@@ -415,7 +493,7 @@ export function YieldEstimation({
         )}
 
         {/* ── Method note ── */}
-        {results.length > 0 && !running && (
+        {/* {results.length > 0 && !running && (
           <div className="flex items-start gap-2 rounded-lg border border-emerald-200/60 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-900/10 px-3 py-2.5">
             <Calculator className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             <p className="text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed">
@@ -424,7 +502,7 @@ export function YieldEstimation({
               no machine learning model or training data involved. Expand a cluster to see the exact formula.
             </p>
           </div>
-        )}
+        )} */}
 
         {/* ── Cluster cards ── */}
         {results.length > 0 && !running && (
@@ -452,7 +530,7 @@ export function YieldEstimation({
         {/* ── Footer ── */}
         {lastUpdated && (
           <p className="text-center text-[10px] text-muted-foreground">
-            Last calculated: {lastUpdated.toLocaleTimeString()} · Rule-based yield estimation (no ML model)
+            Last calculated: {lastUpdated.toLocaleTimeString()} · Rule-based yield estimation
           </p>
         )}
 
@@ -462,37 +540,21 @@ export function YieldEstimation({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// WIRING THIS INTO Analytics.tsx
+// WIRING — now implemented in Analytics.tsx
 // ════════════════════════════════════════════════════════════════════════════
 //
-// Analytics.tsx currently renders:
-//   <YieldEstimation farmId={farmId} overallStats={overallStats} loading={analyticsLoading} />
+// Analytics.tsx now:
+//   1. Reads the farm's `location` via farmService.getFarm(farmId)
+//   2. Calls weatherService.getCurrentWeather(location) once per farmId
+//   3. Passes that WeatherData into buildClusterRawData() for every cluster
+//      (instead of `null`), AND passes weather/weatherLoading/weatherError
+//      straight into <YieldEstimation /> so the card can render the
+//      WeatherChip above with real numbers.
 //
-// That's enough to render the card (it'll show the "no clusters found" empty
-// state until `clusters` is wired up). To make it compute real numbers, pass
-// a `clusters` prop built directly from the cluster documents tree-service.ts
-// already maintains via `_updateClusterStats` — those documents already have
-// `treeCount`, `healthyCount`, and `avgAge` ready to use as-is:
-//
-//   const [clusterDocs, setClusterDocs] = useState<Record<string, any>[]>([]);
-//   useEffect(() => {
-//     if (!farmId) return;
-//     return treeService.getClustersWithStatsStream(farmId, setClusterDocs);
-//   }, [farmId]);
-//
-//   const clusters = clusterDocs.map(doc => buildClusterRawData(doc, currentWeather));
-//
-//   <YieldEstimation
-//     farmId={farmId}
-//     overallStats={overallStats}
-//     loading={analyticsLoading}
-//     clusters={clusters}
-//   />
-//
-// `currentWeather` would come from your existing WeatherService
-// (`weatherService.getCurrentWeather(farmLocation)`), e.g.:
-//   const weather = await weatherService.getCurrentWeather(farm.location);
-//   // weather.current.temp_c, weather.current.precip_mm
+// If a farm has no `location` set, or the weather API call fails, the chip
+// shows "Weather unavailable" honestly, and the engine falls back to its
+// documented neutral weather factor (visible in that cluster's lower
+// confidence score) — nothing is silently faked.
 //
 /**
  * Adapter: maps a cluster document exactly as written by

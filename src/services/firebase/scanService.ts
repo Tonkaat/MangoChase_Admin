@@ -118,6 +118,29 @@ export class ScanService {
     }
   }
 
+  async getLatestScanForTree(
+    farmId: string,
+    treeId: string
+  ): Promise<Record<string, any> | null> {
+    try {
+      const q = query(
+        collection(db, 'farms', farmId, 'scans'),
+        where('treeId', '==', treeId),
+        orderBy('timestamp', 'desc'),
+        limit(1)
+      );
+
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) return null;
+
+      const docSnap = snapshot.docs[0];
+      return { id: docSnap.id, ...docSnap.data() };
+    } catch (error) {
+      console.error('Error getting latest scan for tree:', error);
+      throw error;
+    }
+  }
+
   async getRecentScansWithDetails(farmId: string, limitCount: number = 5): Promise<Record<string, any>[]> {
     try {
       const q = query(

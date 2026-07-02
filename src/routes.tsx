@@ -20,6 +20,7 @@ import Notification from './pages/Notification';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import Journal from './pages/Journal';
+import DiseaseScanRecords from './pages/DiseaseScanRecords';
 
 export const router = createBrowserRouter([
   {
@@ -91,6 +92,10 @@ export const router = createBrowserRouter([
         path: '/settings',
         element: <Settings />,
       },
+      {
+        path: '/scan-records',
+        element: <DiseaseScanRecords />,
+      }
     ],
   },
   {

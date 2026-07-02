@@ -10,27 +10,22 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tree, HealthStatus } from "@/types/tree.types";
-import { MoreHorizontal, Eye, QrCode, Flag, Trash2, Edit, ChevronLeft, ChevronRight } from "lucide-react";
+import { ImageIcon, Loader2, QrCode, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { scanService } from "@/services/firebase/scanService";
+import { deriveInfectionStatus } from "@/types/scan.types";
+import {
+  TreeLatestScanModal,
+  LatestScanInfo,
+} from "@/components/trees/TreeLatestScanModal";
 
 interface TreeInventoryTableProps {
   trees: Tree[];
   selectedTrees: string[];
   onSelectionChange: (ids: string[]) => void;
-  onViewTree: (tree: Tree) => void;
-  onGenerateQR: (tree: Tree) => void;
-  onToggleFlag: (tree: Tree) => void;
-  onDeleteTree: (tree: Tree) => void;
-  onEditTree: (tree: Tree) => void;
+  farmId: string;
   pageSize?: number;
 }
 
@@ -55,14 +50,18 @@ export function TreeInventoryTable({
   trees,
   selectedTrees,
   onSelectionChange,
-  onViewTree,
-  onGenerateQR,
-  onToggleFlag,
-  onDeleteTree,
-  onEditTree,
+  farmId,
   pageSize = 6,
 }: TreeInventoryTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
+
+  // ── Latest-scan modal state ──
+  const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [scanModalTreeName, setScanModalTreeName] = useState<string | null>(null);
+  const [scanModalLoading, setScanModalLoading] = useState(false);
+  const [scanModalError, setScanModalError] = useState<string | null>(null);
+  const [scanModalData, setScanModalData] = useState<LatestScanInfo | null>(null);
+  const [loadingTreeId, setLoadingTreeId] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(trees.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -89,6 +88,36 @@ export function TreeInventoryTable({
       onSelectionChange(selectedTrees.filter((id) => id !== treeId));
     } else {
       onSelectionChange([...selectedTrees, treeId]);
+    }
+  };
+
+  const handleViewLatestScan = async (tree: Tree) => {
+    setScanModalOpen(true);
+    setScanModalTreeName(tree.tree_name || tree.id);
+    setScanModalLoading(true);
+    setScanModalError(null);
+    setScanModalData(null);
+    setLoadingTreeId(tree.id);
+
+    try {
+      const raw = await scanService.getLatestScanForTree(farmId, tree.id);
+
+      if (!raw) {
+        setScanModalData(null);
+      } else {
+        const detectedDisease = raw.detectedDisease || "Unknown";
+        setScanModalData({
+          imageUrl: raw.imageUrl,
+          detectedDisease,
+          infectionStatus: deriveInfectionStatus(detectedDisease),
+          createdAt: raw.timestamp?.toDate?.() ?? new Date(0),
+        });
+      }
+    } catch (err) {
+      setScanModalError("Failed to load the latest scan. Please try again.");
+    } finally {
+      setScanModalLoading(false);
+      setLoadingTreeId(null);
     }
   };
 
@@ -128,19 +157,19 @@ export function TreeInventoryTable({
               <TableHead className="min-w-[100px]">Growth Stage</TableHead>
               <TableHead className="min-w-[120px]">Cluster</TableHead>
               <TableHead className="min-w-[130px]">Last Inspection</TableHead>
-              <TableHead className="w-12 sticky right-0 bg-card z-20">Actions</TableHead>
+              <TableHead className="w-12 sticky right-0 bg-card z-20">Scan</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pagedTrees.map((tree) => {
               const healthConfig = healthStatusConfig[tree.healthStatus] || healthStatusConfig.unknown;
+              const isLoadingThisRow = loadingTreeId === tree.id;
               return (
                 <TableRow
                   key={tree.id}
-                  className="cursor-pointer transition-colors hover:bg-muted/50"
-                  onClick={() => onViewTree(tree)}
+                  className="transition-colors hover:bg-muted/50"
                 >
-                  <TableCell className="sticky left-0 bg-card z-10" onClick={(e) => e.stopPropagation()}>
+                  <TableCell className="sticky left-0 bg-card z-10">
                     <Checkbox
                       checked={selectedTrees.includes(tree.id)}
                       onCheckedChange={() => handleSelectTree(tree.id)}
@@ -183,36 +212,22 @@ export function TreeInventoryTable({
                       ? format(tree.lastInspectionDate, "MMM d, yyyy")
                       : "—"}
                   </TableCell>
-                  <TableCell className="sticky right-0 bg-card z-10" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onClick={() => onViewTree(tree)}>
-                          <Eye className="mr-2 h-4 w-4" /> View details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onEditTree(tree)}>
-                          <Edit className="mr-2 h-4 w-4" /> Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onGenerateQR(tree)}>
-                          <QrCode className="mr-2 h-4 w-4" /> Generate QR
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onToggleFlag(tree)}>
-                          <Flag className="mr-2 h-4 w-4" />
-                          {tree.flagged ? "Remove flag" : "Flag tree"}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => onDeleteTree(tree)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                  <TableCell className="sticky right-0 bg-card z-10">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      disabled={isLoadingThisRow}
+                      onClick={() => handleViewLatestScan(tree)}
+                      aria-label="View latest scan"
+                      title="View latest scan"
+                    >
+                      {isLoadingThisRow ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ImageIcon className="h-4 w-4" />
+                      )}
+                    </Button>
                   </TableCell>
                 </TableRow>
               );
@@ -251,6 +266,15 @@ export function TreeInventoryTable({
           </Button>
         </div>
       </div>
+
+      <TreeLatestScanModal
+        open={scanModalOpen}
+        onClose={() => setScanModalOpen(false)}
+        treeName={scanModalTreeName}
+        isLoading={scanModalLoading}
+        error={scanModalError}
+        scan={scanModalData}
+      />
     </div>
   );
 }

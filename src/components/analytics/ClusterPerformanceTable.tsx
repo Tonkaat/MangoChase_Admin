@@ -62,19 +62,19 @@ export function ClusterPerformanceTable({ data, loading }: ClusterPerformanceTab
           <TableHeader>
             <TableRow>
               <TableHead>Cluster</TableHead>
-              <TableHead>Farm</TableHead>
+              {/* <TableHead>Farm</TableHead> */}
               <TableHead className="text-center">Trees</TableHead>
               <TableHead>Health</TableHead>
-              <TableHead className="text-right">Yield/Tree</TableHead>
+              {/* <TableHead className="text-right">Yield/Tree</TableHead>
               <TableHead className="text-right">Total Yield</TableHead>
-              <TableHead className="text-center">Trend</TableHead>
+              <TableHead className="text-center">Trend</TableHead> */}
             </TableRow>
           </TableHeader>
           <TableBody>
             {data.map((cluster) => (
               <TableRow key={cluster.clusterId}>
                 <TableCell className="font-medium">{cluster.clusterName}</TableCell>
-                <TableCell className="text-muted-foreground">{cluster.farmName}</TableCell>
+                {/* <TableCell className="text-muted-foreground">{cluster.farmName}</TableCell> */}
                 <TableCell className="text-center">{cluster.treeCount}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -87,7 +87,7 @@ export function ClusterPerformanceTable({ data, loading }: ClusterPerformanceTab
                     <span className="text-sm">{cluster.healthyPercentage}%</span>
                   </div>
                 </TableCell>
-                <TableCell className="text-right">{cluster.yieldPerTree} kg</TableCell>
+                {/* <TableCell className="text-right">{cluster.yieldPerTree} kg</TableCell>
                 <TableCell className="text-right font-medium">
                   {cluster.totalYield.toLocaleString()} kg
                 </TableCell>
@@ -107,7 +107,7 @@ export function ClusterPerformanceTable({ data, loading }: ClusterPerformanceTab
                       {cluster.trendPercentage}%
                     </span>
                   </div>
-                </TableCell>
+                </TableCell> */}
               </TableRow>
             ))}
           </TableBody>

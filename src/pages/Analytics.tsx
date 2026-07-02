@@ -1,25 +1,101 @@
-// Analytics.tsx — updated to include AIYieldPrediction
-// Only the changes are marked with ← ADD and ← CHANGE comments
+// src/pages/Analytics.tsx (or wherever this lives in your project)
+//
+// ════════════════════════════════════════════════════════════════════════════
+// CHANGES IN THIS REVISION
+// ════════════════════════════════════════════════════════════════════════════
+//
+//   REMOVED: PredictionInsightCard          — read predictionConfidence/forecastTrend,
+//                                              which useAnalytics no longer returns
+//                                              (those were R²/regression artifacts)
+//   REMOVED: YieldTrendsChart import + the commented-out <YieldTrendsChart />
+//            block                          — it read forecast/forecastUpper/
+//                                              forecastLower/previousYear, all of
+//                                              which were removed from YieldTrend
+//   REMOVED: predictionConfidence, forecastTrend from the useAnalytics() destructure
+//   FIXED:   <YieldEstimation /> now actually receives a `clusters` prop. Before,
+//            it was called with no `clusters` at all, so it defaulted to an empty
+//            array and always showed "No clusters found" regardless of what was
+//            in Firestore — that was the original bug report.
+//   ADDED:   clusterPerformance (already fetched by useAnalytics, and now carrying
+//            healthyCount + avgAge — see analytics.types.ts/useAnalytics.ts) is
+//            mapped through buildClusterRawData() and passed straight into
+//            YieldEstimation. No second Firestore listener needed — the data
+//            useAnalytics already fetches is reused as-is.
+//   ADDED:   real weather is now fetched and fed into the yield engine instead
+//            of `null`. We read the farm's `location` field via
+//            farmService.getFarm(farmId), then call
+//            weatherService.getCurrentWeather(location) once. The result is
+//            passed into buildClusterRawData() for every cluster, AND down
+//            into <YieldEstimation /> as a `weather` prop so the card can show
+//            a real, visible "Weather used in this calculation" chip — see
+//            YieldEstimation.tsx for that part.
+//
+// "AI-powered forecasting" badge in the header was also reworded, since nothing
+// on this page forecasts anymore — every number is a same-instant estimate.
+// ════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { BarChart3, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
+import { BarChart3, Sparkles, Loader2 } from 'lucide-react';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { AnalyticsOverview } from '@/components/analytics/AnalyticsOverview';
 import { AnalyticsFilters } from '@/components/analytics/AnalyticsFilters';
-import { YieldTrendsChart } from '@/components/analytics/YieldTrendsChart';
 import { ClusterPerformanceTable } from '@/components/analytics/ClusterPerformanceTable';
 import { DiseaseFrequencyChart } from '@/components/analytics/DiseaseFrequencyChart';
 import { HealthDistributionChart } from '@/components/analytics/HealthDistributionChart';
-import { PredictionInsightCard } from '@/components/analytics/PredictionInsightCard';
-import { YieldEstimation } from '@/components/analytics/YieldEstimation'; // ← ADD THIS IMPORT
+import { YieldEstimation, buildClusterRawData } from '@/components/analytics/YieldEstimation';
 import { downloadTextFile } from '@/utils/exportHelpers';
 import { firebaseService } from '@/services/firebase';
+import { farmService } from '@/services/firebase/farmService';
+import { weatherService } from '@/services/weatherService';
+import type { WeatherData } from '@/types/weather.types';
 
 export default function Analytics() {
   const [farmId, setFarmId] = useState<string | null>(null);
   const [farmLoading, setFarmLoading] = useState(true);
   const [error, setError] = useState<string | null>(null)
+
+  // ── Weather (for the yield engine + the visible weather chip) ─────────────
+  // Fetched once per farmId: read the farm's `location` field, then ask
+  // WeatherService for current conditions at that location. `weatherError`
+  // is tracked separately from the farm-loading error above so a weather
+  // outage never blocks the rest of the page — the engine and the UI both
+  // handle a missing weather reading honestly (neutral fallback + a visible
+  // "unavailable" state) rather than failing.
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadWeather() {
+      if (!farmId) return;
+      setWeatherLoading(true);
+      setWeatherError(null);
+      try {
+        const farm = await farmService.getFarm(farmId);
+        const location = farm?.location;
+        if (!location) {
+          if (isMounted) setWeatherError('Farm has no location set');
+          return;
+        }
+        const data = await weatherService.getCurrentWeather(location);
+        if (isMounted) setWeather(data);
+      } catch (err) {
+        console.error('❌ Analytics: failed to load weather', err);
+        if (isMounted) setWeatherError('Unable to fetch current weather');
+      } finally {
+        if (isMounted) setWeatherLoading(false);
+      }
+    }
+
+    loadWeather();
+    return () => {
+      isMounted = false;
+    };
+  }, [farmId]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -82,17 +158,24 @@ export default function Analytics() {
     clusterPerformance,
     diseaseFrequency,
     healthDistribution,
-    predictionConfidence,
-    forecastTrend,
     refetch,
   } = useAnalytics(farmId);
 
+  // `clusterPerformance` already has everything buildClusterRawData needs
+  // (treeCount, healthyCount, avgAge) — see analytics.types.ts. Weather is
+  // now the REAL reading fetched above, not null — every cluster's weather
+  // factor reflects actual current conditions at the farm's location.
+  const yieldEstimationClusters = clusterPerformance.map((c) =>
+    buildClusterRawData(
+      { id: c.clusterId, name: c.clusterName, treeCount: c.treeCount, healthyCount: c.healthyCount, avgAge: c.avgAge },
+      weather,
+    ),
+  );
+
   const handleExport = (format: 'csv' | 'pdf') => {
     if (format === 'csv') {
-      const headers = ['Period', 'Yield (kg)', 'Previous Year', 'AI Forecast'];
-      const rows = yieldTrends.map((t) =>
-        [t.period, t.yield ?? '', t.previousYear ?? '', t.forecast ?? ''].join(','),
-      );
+      const headers = ['Period', 'Estimated Yield (kg)'];
+      const rows = yieldTrends.map((t) => [t.period, t.yield ?? ''].join(','));
       const csv = [headers.join(','), ...rows].join('\n');
       downloadTextFile('analytics-yield-trends.csv', csv);
       toast.success('CSV exported successfully');
@@ -147,7 +230,7 @@ export default function Analytics() {
               <h1 className="font-display text-3xl font-bold">Mango Analytics</h1>
             </div>
             <p className="text-muted-foreground">
-              Live farm intelligence · Yield estimations · Disease risk analysis
+              Live farm intelligence · Yield estimation · Disease risk analysis
             </p>
           </div>
         </div>
@@ -159,34 +242,18 @@ export default function Analytics() {
       {/* ── KPI overview ── */}
       <AnalyticsOverview stats={overallStats} loading={analyticsLoading} />
 
-      {/* ── Prediction insight banner ── */}
-      {/* <PredictionInsightCard
-        loading={analyticsLoading}
-        predictionConfidence={predictionConfidence}
-        forecastTrend={forecastTrend}
-        overallStats={overallStats}
-        diseaseFrequency={diseaseFrequency}
-      /> */}
-
-      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      {/* ← ADD THIS BLOCK — AI Yield Prediction (new multi-parameter model) */}
-
-      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-
-      {/* ── Main charts ── */}
+      {/* ── Main content ── */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          {/* <YieldTrendsChart
-            data={yieldTrends}
+          <YieldEstimation
+            farmId={farmId}
+            overallStats={overallStats}
             loading={analyticsLoading}
-            predictionConfidence={predictionConfidence}
-            forecastTrend={forecastTrend}
-          /> */}
-        <YieldEstimation
-          farmId={farmId}
-          overallStats={overallStats}
-          loading={analyticsLoading}
-        />
+            clusters={yieldEstimationClusters}
+            weather={weather}
+            weatherLoading={weatherLoading}
+            weatherError={weatherError}
+          />
         </div>
         <HealthDistributionChart data={healthDistribution} loading={analyticsLoading} />
       </div>

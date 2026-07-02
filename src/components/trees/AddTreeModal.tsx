@@ -21,12 +21,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+// NOTE: The Agronomic Details accordion is temporarily disabled (see SingleTreeForm).
+// Re-enable this import if you bring that section back.
+// import {
+//   Accordion,
+//   AccordionContent,
+//   AccordionItem,
+//   AccordionTrigger,
+// } from "@/components/ui/accordion";
 import {
   Tree,
   TreeData,
@@ -45,11 +47,11 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  Ruler,
   Leaf,
-  Droplets,
-  Scale,
+  Settings2,
 } from "lucide-react";
+// NOTE: `Ruler` and `Scale` icons were used by the Agronomic Details accordion
+// (now disabled below). Re-import them alongside the Accordion import above if re-enabled.
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -74,16 +76,23 @@ type FormEntry = {
   notes: string;
   location: string;
   plantedDate: Date | undefined;
-  // ── NEW: Agronomic fields ──
+  // ── Agronomic fields (UI temporarily disabled, data shape kept) ──
   height: string;        // metres — string for input binding
   canopySpread: string;  // metres
   lastYield: string;     // kg
 };
 
-const DEFAULT_ENTRY = (): FormEntry => ({
+// ─── Fixed study parameters ────────────────────────────────────────────────
+// This study currently only tracks one type/variety combination, so these
+// are no longer editable per-tree — just displayed. If that changes, turn
+// the static info row in SingleTreeForm back into Type/Variety inputs.
+const TREE_TYPE = "Mango";
+const TREE_VARIETY = "Carabao";
+
+const DEFAULT_ENTRY = (overrides?: Partial<FormEntry>): FormEntry => ({
   id: Math.random().toString(36).slice(2),
-  type: "",
-  variety: "",
+  type: TREE_TYPE,
+  variety: TREE_VARIETY,
   healthStatus: "Healthy" as HealthStatus,
   growthStage: "seedling" as GrowthStage,
   cluster: "",
@@ -93,6 +102,7 @@ const DEFAULT_ENTRY = (): FormEntry => ({
   height: "",
   canopySpread: "",
   lastYield: "",
+  ...overrides,
 });
 
 const HEALTH_STATUSES: { value: HealthStatus; label: string; color: string }[] = [
@@ -124,32 +134,13 @@ function SingleTreeForm({
 }) {
   return (
     <div className="space-y-4">
-      {/* Type + Variety */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            Tree Type <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            placeholder="e.g., Mango"
-            value={entry.type}
-            onChange={(e) => onChange("type", e.target.value)}
-            disabled={disabled}
-            className="h-9"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            Variety <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            placeholder="e.g., Carabao"
-            value={entry.variety}
-            onChange={(e) => onChange("variety", e.target.value)}
-            disabled={disabled}
-            className="h-9"
-          />
-        </div>
+      {/* Type + Variety — fixed for this study, displayed only (not editable) */}
+      <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+        <Leaf className="h-4 w-4 text-emerald-600" />
+        <span className="text-sm font-medium">{TREE_TYPE}</span>
+        <span className="text-muted-foreground">·</span>
+        <Badge variant="secondary" className="text-xs">{TREE_VARIETY}</Badge>
+        <span className="ml-auto text-[10px] text-muted-foreground">Fixed for this study</span>
       </div>
 
       {/* Health + Growth */}
@@ -214,47 +205,54 @@ function SingleTreeForm({
         </Select>
       </div>
 
-      {/* Location + Planted Date */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Location (Optional)</Label>
-          <Input
-            placeholder="Row 3, Position 15"
-            value={entry.location}
-            onChange={(e) => onChange("location", e.target.value)}
-            disabled={disabled}
-            className="h-9"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Planted Date (Optional)</Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-9 w-full justify-start text-left font-normal text-sm",
-                  !entry.plantedDate && "text-muted-foreground",
-                )}
-                disabled={disabled}
-              >
-                <Calendar className="mr-2 h-3.5 w-3.5" />
-                {entry.plantedDate ? format(entry.plantedDate, "PP") : "Pick date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <CalendarComponent
-                mode="single"
-                selected={entry.plantedDate}
-                onSelect={(d) => onChange("plantedDate", d)}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-        </div>
+      {/* Location (Optional) — temporarily disabled.
+          To re-enable: uncomment this block and put it back in a
+          `grid grid-cols-2 gap-3` row next to Planted Date below. */}
+      {/*
+      <div className="space-y-1.5">
+        <Label className="text-xs">Location (Optional)</Label>
+        <Input
+          placeholder="Row 3, Position 15"
+          value={entry.location}
+          onChange={(e) => onChange("location", e.target.value)}
+          disabled={disabled}
+          className="h-9"
+        />
+      </div>
+      */}
+
+      {/* Planted Date (Optional) */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Planted Date (Optional)</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "h-9 w-full justify-start text-left font-normal text-sm",
+                !entry.plantedDate && "text-muted-foreground",
+              )}
+              disabled={disabled}
+            >
+              <Calendar className="mr-2 h-3.5 w-3.5" />
+              {entry.plantedDate ? format(entry.plantedDate, "PP") : "Pick date"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <CalendarComponent
+              mode="single"
+              selected={entry.plantedDate}
+              onSelect={(d) => onChange("plantedDate", d)}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
       </div>
 
-      {/* ── NEW: Agronomic fields (collapsible) ── */}
+      {/* ── Agronomic Details — temporarily disabled ──
+          To re-enable: uncomment this block, restore the Accordion import
+          at the top of the file, and restore the `Ruler, Scale` icon imports. */}
+      {/*
       <Accordion type="single" collapsible>
         <AccordionItem value="agronomic" className="border rounded-lg px-3">
           <AccordionTrigger className="text-xs font-medium text-muted-foreground hover:no-underline py-2">
@@ -269,7 +267,6 @@ function SingleTreeForm({
           <AccordionContent className="pb-3">
             <div className="space-y-3 pt-1">
               <div className="grid grid-cols-2 gap-3">
-                {/* Height */}
                 <div className="space-y-1.5">
                   <Label className="text-xs flex items-center gap-1">
                     <Ruler className="h-3 w-3 text-muted-foreground" />
@@ -286,7 +283,6 @@ function SingleTreeForm({
                     className="h-9"
                   />
                 </div>
-                {/* Canopy */}
                 <div className="space-y-1.5">
                   <Label className="text-xs flex items-center gap-1">
                     <Leaf className="h-3 w-3 text-muted-foreground" />
@@ -304,7 +300,6 @@ function SingleTreeForm({
                   />
                 </div>
               </div>
-              {/* Last Yield */}
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1">
                   <Scale className="h-3 w-3 text-muted-foreground" />
@@ -328,6 +323,7 @@ function SingleTreeForm({
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+      */}
 
       {/* Notes */}
       <div className="space-y-1.5">
@@ -357,7 +353,6 @@ function BatchTreeCard({
   onChange,
   onDuplicate,
   onRemove,
-  canRemove,
 }: {
   entry: FormEntry;
   index: number;
@@ -368,34 +363,37 @@ function BatchTreeCard({
   onChange: (field: keyof FormEntry, value: any) => void;
   onDuplicate: () => void;
   onRemove: () => void;
-  canRemove: boolean;
 }) {
-  const isValid = entry.type.trim() && entry.variety.trim();
-  const summary = entry.type && entry.variety
-    ? `${entry.type} · ${entry.variety}${entry.cluster ? ` · ${entry.cluster}` : ""}`
-    : "Fill in type and variety";
+  // Type/variety are fixed now, so every card is "valid" by default —
+  // the summary just surfaces whatever's been customized.
+  const summaryParts = [
+    entry.cluster ? `Cluster: ${entry.cluster}` : null,
+    entry.healthStatus !== "Healthy" ? entry.healthStatus : null,
+    entry.growthStage !== "seedling"
+      ? GROWTH_STAGES.find((s) => s.value === entry.growthStage)?.label
+      : null,
+  ].filter(Boolean) as string[];
+  const summary = summaryParts.length > 0 ? summaryParts.join(" · ") : "Default settings";
 
   return (
-    <div className={`rounded-lg border transition-all ${isValid ? "border-border" : "border-dashed border-muted-foreground/40"}`}>
+    <div className="rounded-lg border border-border">
       <div className="flex cursor-pointer items-center gap-3 p-3" onClick={onToggle}>
-        <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isValid ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
           {index + 1}
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm truncate ${isValid ? "text-foreground" : "text-muted-foreground"}`}>
-            {summary}
+          <p className="text-sm truncate text-foreground">
+            {TREE_TYPE} · {TREE_VARIETY}
           </p>
-          {!isValid && <p className="text-xs text-destructive/70">Type and variety required</p>}
+          <p className="text-xs text-muted-foreground truncate">{summary}</p>
         </div>
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onDuplicate} disabled={disabled} title="Duplicate">
             <Copy className="h-3 w-3" />
           </Button>
-          {canRemove && (
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onRemove} disabled={disabled}>
-              <X className="h-3 w-3" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onRemove} disabled={disabled} title="Remove">
+            <X className="h-3 w-3" />
+          </Button>
           {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
       </div>
@@ -421,8 +419,20 @@ export function AddTreeModal({
 }: AddTreeModalProps) {
   const [mode, setMode] = useState<"single" | "batch">("single");
   const [singleEntry, setSingleEntry] = useState<FormEntry>(DEFAULT_ENTRY());
-  const [batchEntries, setBatchEntries] = useState<FormEntry[]>([DEFAULT_ENTRY(), DEFAULT_ENTRY()]);
-  const [expandedIdx, setExpandedIdx] = useState<number>(0);
+  const [batchEntries, setBatchEntries] = useState<FormEntry[]>([]);
+  const [expandedIdx, setExpandedIdx] = useState<number>(-1);
+  const [bulkCount, setBulkCount] = useState<string>("10");
+  const [quickDefaults, setQuickDefaults] = useState<{
+    healthStatus: HealthStatus;
+    growthStage: GrowthStage;
+    cluster: string;
+    plantedDate: Date | undefined;
+  }>({
+    healthStatus: "Healthy",
+    growthStage: "seedling",
+    cluster: "",
+    plantedDate: undefined,
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -431,8 +441,8 @@ export function AddTreeModal({
       if (editingTree) {
         setSingleEntry({
           id: editingTree.id,
-          type: editingTree.type || "",
-          variety: editingTree.variety || "",
+          type: TREE_TYPE,
+          variety: TREE_VARIETY,
           healthStatus: editingTree.healthStatus || "Healthy",
           growthStage: editingTree.growthStage || "seedling",
           cluster: editingTree.cluster || "",
@@ -446,8 +456,15 @@ export function AddTreeModal({
         setMode("single");
       } else {
         setSingleEntry(DEFAULT_ENTRY());
-        setBatchEntries([DEFAULT_ENTRY(), DEFAULT_ENTRY()]);
-        setExpandedIdx(0);
+        setBatchEntries([]);
+        setExpandedIdx(-1);
+        setBulkCount("10");
+        setQuickDefaults({
+          healthStatus: "Healthy",
+          growthStage: "seedling",
+          cluster: "",
+          plantedDate: undefined,
+        });
       }
       setError("");
     }
@@ -459,9 +476,33 @@ export function AddTreeModal({
   const updateBatchField = (idx: number, field: keyof FormEntry, value: any) =>
     setBatchEntries((prev) => prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e)));
 
-  const addBatchEntry = () => {
-    setBatchEntries((prev) => [...prev, DEFAULT_ENTRY()]);
-    setExpandedIdx(batchEntries.length);
+  // ── Bulk add: the main fix for "100 trees, one click at a time" ──
+  const addBulkEntries = (count: number) => {
+    const n = Math.max(1, Math.min(500, Math.floor(count) || 0));
+    if (n <= 0) return;
+    const newEntries = Array.from({ length: n }, () =>
+      DEFAULT_ENTRY({
+        healthStatus: quickDefaults.healthStatus,
+        growthStage: quickDefaults.growthStage,
+        cluster: quickDefaults.cluster,
+        plantedDate: quickDefaults.plantedDate,
+      }),
+    );
+    setBatchEntries((prev) => [...prev, ...newEntries]);
+    setExpandedIdx(-1); // keep the list collapsed — nothing's required, nothing to fix
+  };
+
+  // Retroactively stamp the current quick-defaults onto every entry already added
+  const applyDefaultsToAll = () => {
+    setBatchEntries((prev) =>
+      prev.map((e) => ({
+        ...e,
+        healthStatus: quickDefaults.healthStatus,
+        growthStage: quickDefaults.growthStage,
+        cluster: quickDefaults.cluster,
+        plantedDate: quickDefaults.plantedDate,
+      })),
+    );
   };
 
   const duplicateBatchEntry = (idx: number) => {
@@ -474,7 +515,12 @@ export function AddTreeModal({
 
   const removeBatchEntry = (idx: number) => {
     setBatchEntries((prev) => prev.filter((_, i) => i !== idx));
-    setExpandedIdx(Math.max(0, expandedIdx - 1));
+    setExpandedIdx(-1);
+  };
+
+  const clearAllBatch = () => {
+    setBatchEntries([]);
+    setExpandedIdx(-1);
   };
 
   const entryToTreeData = (entry: FormEntry): TreeData => ({
@@ -488,7 +534,8 @@ export function AddTreeModal({
     location: entry.location.trim() || undefined,
     plantedDate: entry.plantedDate,
     lastInspection: new Date(),
-    // ── Agronomic ──
+    // Agronomic inputs are hidden for now; entry.height/canopySpread/lastYield
+    // stay "" so these resolve to undefined until that section is re-enabled.
     height: entry.height ? parseFloat(entry.height) : undefined,
     canopySpread: entry.canopySpread ? parseFloat(entry.canopySpread) : undefined,
     lastYield: entry.lastYield ? parseFloat(entry.lastYield) : undefined,
@@ -499,8 +546,6 @@ export function AddTreeModal({
     setError("");
 
     if (mode === "single") {
-      if (!singleEntry.type.trim()) return setError("Tree type is required");
-      if (!singleEntry.variety.trim()) return setError("Variety is required");
       try {
         setSubmitting(true);
         await onSubmit(entryToTreeData(singleEntry));
@@ -511,9 +556,8 @@ export function AddTreeModal({
         setSubmitting(false);
       }
     } else {
-      const invalid = batchEntries.filter((e) => !e.type.trim() || !e.variety.trim());
-      if (invalid.length > 0) {
-        return setError(`${invalid.length} entr${invalid.length === 1 ? "y" : "ies"} missing type or variety`);
+      if (batchEntries.length === 0) {
+        return setError("Add at least one tree before submitting");
       }
       try {
         setSubmitting(true);
@@ -532,8 +576,6 @@ export function AddTreeModal({
     }
   };
 
-  const validBatchCount = batchEntries.filter((e) => e.type.trim() && e.variety.trim()).length;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex flex-col sm:max-w-[640px] max-h-[90vh]">
@@ -542,7 +584,7 @@ export function AddTreeModal({
           <DialogDescription>
             {editingTree
               ? `Editing: ${editingTree.tree_name || editingTree.id.slice(0, 8)}`
-              : "Add one or multiple trees at once. Agronomic details improve yield predictions."}
+              : `Tree type is fixed to ${TREE_TYPE} (${TREE_VARIETY}) for this study. Use Batch Add to add many trees at once.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -577,35 +619,193 @@ export function AddTreeModal({
           )}
 
           {mode === "batch" && !editingTree && (
-            <div className="space-y-2 py-2">
-              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                <span>
-                  <span className="font-medium text-foreground">{batchEntries.length}</span> trees ·{" "}
-                  <span className="font-medium text-primary">{validBatchCount}</span> ready
-                </span>
-                <span>Click a card to expand</span>
+            <div className="space-y-3 py-2">
+              {/* Default values applied to newly added trees */}
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Settings2 className="h-3.5 w-3.5" />
+                  Default values for new trees
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Health Status</Label>
+                    <Select
+                      value={quickDefaults.healthStatus}
+                      onValueChange={(v) =>
+                        setQuickDefaults((prev) => ({ ...prev, healthStatus: v as HealthStatus }))
+                      }
+                      disabled={submitting}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {HEALTH_STATUSES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            <span className={s.color}>{s.label}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Growth Stage</Label>
+                    <Select
+                      value={quickDefaults.growthStage}
+                      onValueChange={(v) =>
+                        setQuickDefaults((prev) => ({ ...prev, growthStage: v as GrowthStage }))
+                      }
+                      disabled={submitting}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GROWTH_STAGES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Cluster (Optional)</Label>
+                    <Select
+                      value={quickDefaults.cluster || "none"}
+                      onValueChange={(v) =>
+                        setQuickDefaults((prev) => ({ ...prev, cluster: v === "none" ? "" : v }))
+                      }
+                      disabled={submitting}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="No cluster" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Cluster (Default)</SelectItem>
+                        {clusters.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Planted Date (Optional)</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "h-9 w-full justify-start text-left font-normal text-sm",
+                            !quickDefaults.plantedDate && "text-muted-foreground",
+                          )}
+                          disabled={submitting}
+                        >
+                          <Calendar className="mr-2 h-3.5 w-3.5" />
+                          {quickDefaults.plantedDate ? format(quickDefaults.plantedDate, "PP") : "Pick date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={quickDefaults.plantedDate}
+                          onSelect={(d) => setQuickDefaults((prev) => ({ ...prev, plantedDate: d }))}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+                {batchEntries.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={applyDefaultsToAll}
+                    disabled={submitting}
+                  >
+                    Apply these values to all {batchEntries.length} trees already added
+                  </Button>
+                )}
               </div>
 
-              {batchEntries.map((entry, idx) => (
-                <BatchTreeCard
-                  key={entry.id}
-                  entry={entry}
-                  index={idx}
-                  clusters={clusters}
-                  disabled={submitting}
-                  isExpanded={expandedIdx === idx}
-                  onToggle={() => setExpandedIdx(expandedIdx === idx ? -1 : idx)}
-                  onChange={(field, value) => updateBatchField(idx, field, value)}
-                  onDuplicate={() => duplicateBatchEntry(idx)}
-                  onRemove={() => removeBatchEntry(idx)}
-                  canRemove={batchEntries.length > 1}
-                />
-              ))}
+              {/* Bulk add control */}
+              <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Add multiple trees at once</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={bulkCount}
+                    onChange={(e) => setBulkCount(e.target.value)}
+                    className="h-9 w-24"
+                    disabled={submitting}
+                  />
+                  <Button
+                    className="flex-1"
+                    onClick={() => addBulkEntries(parseInt(bulkCount, 10))}
+                    disabled={submitting}
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add {bulkCount || 0} Tree{bulkCount === "1" ? "" : "s"}
+                  </Button>
+                </div>
+                <div className="flex gap-1.5">
+                  {[10, 25, 50, 100].map((n) => (
+                    <Button
+                      key={n}
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 text-xs"
+                      onClick={() => addBulkEntries(n)}
+                      disabled={submitting}
+                    >
+                      +{n}
+                    </Button>
+                  ))}
+                </div>
+              </div>
 
-              <Button variant="outline" size="sm" className="w-full border-dashed" onClick={addBatchEntry} disabled={submitting}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add Another Tree
-              </Button>
+              {/* Summary + list */}
+              {batchEntries.length > 0 ? (
+                <>
+                  <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                    <span>
+                      <span className="font-medium text-foreground">{batchEntries.length}</span> trees ready to add
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearAllBatch}
+                      className="text-destructive hover:underline disabled:opacity-50"
+                      disabled={submitting}
+                    >
+                      Clear all
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {batchEntries.map((entry, idx) => (
+                      <BatchTreeCard
+                        key={entry.id}
+                        entry={entry}
+                        index={idx}
+                        clusters={clusters}
+                        disabled={submitting}
+                        isExpanded={expandedIdx === idx}
+                        onToggle={() => setExpandedIdx(expandedIdx === idx ? -1 : idx)}
+                        onChange={(field, value) => updateBatchField(idx, field, value)}
+                        onDuplicate={() => duplicateBatchEntry(idx)}
+                        onRemove={() => removeBatchEntry(idx)}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No trees added yet — use the controls above to add trees in bulk.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -620,12 +820,15 @@ export function AddTreeModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting || (mode === "batch" && !editingTree && batchEntries.length === 0)}
+          >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {editingTree
               ? "Save Changes"
               : mode === "batch"
-              ? `Add ${validBatchCount > 0 ? validBatchCount : batchEntries.length} Tree${batchEntries.length !== 1 ? "s" : ""}`
+              ? `Add ${batchEntries.length} Tree${batchEntries.length !== 1 ? "s" : ""}`
               : "Add Tree"}
           </Button>
         </DialogFooter>

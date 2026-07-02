@@ -67,7 +67,17 @@ export function useUserManagement() {
           return mapDocToUser(docSnap.id, data);
         });
 
-        // Also fetch users assigned via assignedClusters within this farm
+        // Also fetch users assigned via assignedClusters within this farm.
+        //
+        // ⚠️ Cluster doc IDs are NOT globally unique — they're just names
+        // like "Default" or "Block A" (see treeService, which defaults every
+        // new farm's first cluster to "Default"). This query has no farmId
+        // filter, so without the guard below it can match a farmer on a
+        // *different* farm whose own cluster happens to share the same
+        // name/ID — that's the "farmer from another farm shows up here"
+        // bug. We keep the query farmId-less (so legacy docs missing a
+        // farmId are still caught), but reject any result whose farmId is
+        // explicitly set to some other farm.
         const clusterIds = clusters.map((c) => c.id);
         if (clusterIds.length > 0) {
           // Firestore 'array-contains-any' supports up to 30 values
@@ -77,8 +87,10 @@ export function useUserManagement() {
           );
           const clusterSnapshot = await getDocs(clusterQuery);
           clusterSnapshot.docs.forEach((docSnap) => {
-            if (!userList.find((u) => u.id === docSnap.id)) {
-              userList.push(mapDocToUser(docSnap.id, docSnap.data()));
+            const data = docSnap.data();
+            const belongsToAnotherFarm = data.farmId && data.farmId !== currentFarmId;
+            if (!belongsToAnotherFarm && !userList.find((u) => u.id === docSnap.id)) {
+              userList.push(mapDocToUser(docSnap.id, data));
             }
           });
         }
@@ -108,7 +120,14 @@ export function useUserManagement() {
         snapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
 
-          // Resolve farmer name assigned to this cluster
+          // Resolve farmer name assigned to this cluster.
+          //
+          // Same cross-farm leakage risk as above: this query matches on
+          // cluster ID alone, with no farmId filter, so a farmer on another
+          // farm whose cluster happens to share this ID/name would
+          // otherwise get shown as "assigned" here. Filter the candidates
+          // down to ones that actually belong to this farm (or have no
+          // farmId at all, for legacy docs) before taking the first match.
           let farmerName: string | undefined;
           try {
             const farmerQuery = query(
@@ -117,8 +136,12 @@ export function useUserManagement() {
               where('role', '==', 'farmer')
             );
             const farmerSnap = await getDocs(farmerQuery);
-            if (!farmerSnap.empty) {
-              farmerName = farmerSnap.docs[0].data().name;
+            const matchingFarmer = farmerSnap.docs.find((d) => {
+              const fd = d.data();
+              return !fd.farmId || fd.farmId === currentFarmId;
+            });
+            if (matchingFarmer) {
+              farmerName = matchingFarmer.data().name;
             }
           } catch (_) {
             // non-critical

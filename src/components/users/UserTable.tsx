@@ -273,9 +273,9 @@ export function UserTable({
                   <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Cluster
                   </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {/* <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Verification
-                  </TableHead>
+                  </TableHead> */}
                   <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Status
                   </TableHead>
@@ -334,11 +334,11 @@ export function UserTable({
                           <span className="text-sm text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      {/* <TableCell>
                         {user.role === 'farmer' ? getTierBadge(user.verificationTier) : (
                           <span className="text-sm text-muted-foreground">—</span>
                         )}
-                      </TableCell>
+                      </TableCell> */}
                       <TableCell>{getStatusIndicator(user.status)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {user.lastActivityAt

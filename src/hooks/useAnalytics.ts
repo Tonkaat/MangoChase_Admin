@@ -1,3 +1,43 @@
+// src/hooks/useAnalytics.ts
+//
+// ════════════════════════════════════════════════════════════════════════════
+// CHANGES IN THIS REVISION
+// ════════════════════════════════════════════════════════════════════════════
+//
+//   REMOVED: linearRegression()           — was used to forecast 3 months ahead
+//   REMOVED: estimateYieldFromHealth()     — hardcoded formula (baseYieldPerTree=22,
+//                                            healthFactor = 0.4 + 0.6*health), separate
+//                                            from and inconsistent with
+//                                            src/lib/yieldEstimation.engine.ts
+//   REMOVED: predictionConfidence, forecastTrend — R²-based "confidence" and
+//                                            slope-based trend direction; both were
+//                                            statistical artifacts of fitting a line
+//                                            to 9 months of partly-synthetic data,
+//                                            not a real measurement of anything
+//   REMOVED: forecast/forecastUpper/forecastLower/previousYear on each YieldTrend —
+//                                            projected future months + a previous-year
+//                                            comparison built from Math.random() noise
+//
+//   ADDED: every yield number on this page (monthly trend bars AND the cluster
+//          performance table) now comes from estimateYield() in
+//          src/lib/yieldEstimation.engine.ts — the SAME rule-based formula used
+//          by the Yield Estimation card. There is exactly one yield model in
+//          this codebase now, not two disagreeing ones.
+//   ADDED: per-cluster avgAge and healthyCount, computed the same way
+//          tree-service.ts's _updateClusterStats does (prefer tree.age, else
+//          derive years from tree.plantedDate), since the engine needs both.
+//
+// WHY THE TREND CHART ONLY SHOWS PAST MONTHS
+// ---------------------------------------------
+// The capstone's design requirement is "yield ESTIMATION from current
+// condition," not forecasting. A monthly trend chart is still useful (it
+// shows how a farm's estimated yield has moved as health data changed), but
+// every bar on it is a snapshot estimate for trees as they existed THAT
+// month — never a projection of a future month. There is no "next 3 months"
+// on this chart anymore.
+//
+// ════════════════════════════════════════════════════════════════════════════
+
 import { useState, useEffect, useCallback } from 'react';
 import {
   collection,
@@ -5,10 +45,10 @@ import {
   query,
   where,
   orderBy,
-  limit,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import { estimateYield, detectSeasonFromDate, type Season } from '@/lib/yieldEstimation.engine';
 import type {
   OverallStats,
   YieldTrend,
@@ -18,38 +58,41 @@ import type {
   AnalyticsFilters,
 } from '@/types/analytics.types';
 
-// ─── Simple linear regression ──────────────────────────────────────────────────
-function linearRegression(y: number[]): { slope: number; intercept: number; r2: number } {
-  const n = y.length;
-  if (n < 2) return { slope: 0, intercept: y[0] ?? 0, r2: 0 };
-  const x = y.map((_, i) => i);
-  const xMean = x.reduce((a, b) => a + b, 0) / n;
-  const yMean = y.reduce((a, b) => a + b, 0) / n;
-  const ssXY = x.reduce((acc, xi, i) => acc + (xi - xMean) * (y[i] - yMean), 0);
-  const ssXX = x.reduce((acc, xi) => acc + (xi - xMean) ** 2, 0);
-  const slope = ssXX === 0 ? 0 : ssXY / ssXX;
-  const intercept = yMean - slope * xMean;
-  const yPred = x.map((xi) => slope * xi + intercept);
-  const ssTot = y.reduce((acc, yi) => acc + (yi - yMean) ** 2, 0);
-  const ssRes = y.reduce((acc, yi, i) => acc + (yi - yPred[i]) ** 2, 0);
-  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
-  return { slope, intercept, r2 };
-}
-
-// ─── Yield estimation from health + scan data ─────────────────────────────────
-function estimateYieldFromHealth(
-  healthPct: number,
-  treeCount: number,
-  baseYieldPerTree = 22,
-): number {
-  // Disease burden penalty: lower health → lower yield
-  const healthFactor = 0.4 + 0.6 * (healthPct / 100);
-  return Math.round(treeCount * baseYieldPerTree * healthFactor);
-}
-
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
+// ─── Age helper (mirrors tree-service.ts's _updateClusterStats exactly) ────────
+//
+// Prefers a stored `age` field; otherwise derives years-since-planting from
+// `plantedDate`. Kept identical to tree-service.ts's logic on purpose — this
+// hook and the Firestore-side cluster stats aggregation should never disagree
+// about what a tree's age is.
+function getTreeAgeYears(tree: any): number | null {
+  if (tree.age != null) return tree.age;
+  if (tree.plantedDate) {
+    const planted = tree.plantedDate?.toDate?.() ?? new Date(tree.plantedDate);
+    return Math.max(0, (Date.now() - planted.getTime()) / (1000 * 60 * 60 * 24 * 365));
+  }
+  return null;
+}
+
+function average(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+// ─── Season-from-month helper (for re-estimating past months) ─────────────────
+//
+// detectSeasonFromDate() in the engine uses the CURRENT date. For past months
+// in the trend chart we need the season for THAT month specifically, so we
+// reuse the same dry-season window (Nov–Apr) the engine documents, applied to
+// an arbitrary month number instead of "today."
+function seasonForMonth(monthNum0to11: number): Season {
+  const month = monthNum0to11 + 1; // 1–12
+  const isDry = month === 11 || month === 12 || (month >= 1 && month <= 4);
+  return isDry ? 'Dry' : 'Wet';
+}
+
+export function useAnalytics(farmId?: string | null, filters?: AnalyticsFilters) {
   const [loading, setLoading] = useState(true);
   const [overallStats, setOverallStats] = useState<OverallStats>({
     totalFarms: 0,
@@ -63,8 +106,6 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
   const [clusterPerformance, setClusterPerformance] = useState<ClusterPerformance[]>([]);
   const [diseaseFrequency, setDiseaseFrequency] = useState<DiseaseFrequency[]>([]);
   const [healthDistribution, setHealthDistribution] = useState<HealthDistribution[]>([]);
-  const [predictionConfidence, setPredictionConfidence] = useState<number>(0);
-  const [forecastTrend, setForecastTrend] = useState<'up' | 'down' | 'stable'>('stable');
 
   const fetchData = useCallback(async () => {
     if (!farmId) return;
@@ -85,6 +126,11 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
       const warningTrees = totalTrees - healthyTrees - criticalTrees;
       const averageHealth =
         totalTrees > 0 ? Math.round((healthyTrees / totalTrees) * 100) : 0;
+
+      // Farm-wide average age, used as a fallback for months/clusters with
+      // no better age data (e.g. a brand-new cluster) — see step 8/6 below.
+      const knownAges = trees.map(getTreeAgeYears).filter((a): a is number => a != null);
+      const farmAvgAge = knownAges.length > 0 ? average(knownAges) : 8; // 8 = a neutral, roughly-mature default
 
       // ── 2. Tasks ──────────────────────────────────────────────────────────
       const tasksSnap = await getDocs(
@@ -156,8 +202,11 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
               : 'low'),
         }));
 
-      // ── 6. Monthly yield trend & forecast via linear regression ───────────
-      // Bucket scans into months → derive health ratio → estimate yield
+      // ── 6. Monthly yield trend — PAST MONTHS ONLY, rule-based ─────────────
+      // Bucket scans into months to get that month's health ratio, then run
+      // the same estimateYield() formula used everywhere else in the app.
+      // No regression, no forecast, no projected future months, no
+      // synthetic "previous year" comparison.
       const monthlyHealthMap: Record<string, { healthy: number; total: number }> = {};
       scans.forEach((s) => {
         const ts: Date = s.timestamp?.toDate?.() ?? new Date(0);
@@ -170,110 +219,100 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
         }
       });
 
-      // Build 12-month rolling window
+      // 12-month rolling window, all past (no future months appended).
       const months: string[] = [];
       for (let i = 11; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
       }
 
-      const currentMonthIdx = now.getMonth();
-      const baseYield = totalTrees > 0 ? totalTrees * 22 : 3000;
-
-      const historicalYields: number[] = months.slice(0, 9).map((key) => {
+      const trends: YieldTrend[] = months.map((key) => {
+        const monthNum0 = parseInt(key.split('-')[1], 10) - 1;
+        const label = MONTH_LABELS[monthNum0];
         const bucket = monthlyHealthMap[key];
-        if (bucket && bucket.total > 0) {
-          const healthRatio = bucket.healthy / bucket.total;
-          return estimateYieldFromHealth(healthRatio * 100, totalTrees || 130);
-        }
-        // Fallback: use overall health + seasonal variation
-        const monthNum = parseInt(key.split('-')[1]) - 1;
-        const seasonal = 1 + 0.15 * Math.sin(((monthNum - 2) * Math.PI) / 6);
-        return Math.round(baseYield * (averageHealth / 100) * seasonal * (0.85 + Math.random() * 0.15));
-      });
 
-      // Regression on the last 9 months to predict next 3
-      const reg = linearRegression(historicalYields);
-      setPredictionConfidence(Math.round(Math.max(0, Math.min(100, reg.r2 * 100))));
-      setForecastTrend(reg.slope > 50 ? 'up' : reg.slope < -50 ? 'down' : 'stable');
+        // If we have scan data for this month, use that month's real health
+        // ratio against the farm's tree count. If not, fall back to the
+        // farm's current overall health (we have no better information for
+        // a month with zero scans) — still run through the SAME engine, just
+        // with the best available inputs for that month, never invented data.
+        const healthyCountForMonth = bucket && bucket.total > 0
+          ? Math.round((bucket.healthy / bucket.total) * (totalTrees || bucket.total))
+          : healthyTrees;
+        const totalCountForMonth = bucket && bucket.total > 0 ? (totalTrees || bucket.total) : totalTrees;
 
-      const trends: YieldTrend[] = months.map((key, i) => {
-        const monthNum = parseInt(key.split('-')[1]) - 1;
-        const label = MONTH_LABELS[monthNum];
-        const isPast = i < 9;
-        const currentYield = isPast ? historicalYields[i] : undefined;
-
-        // Prev year estimate
-        const prevSeasonal = 1 + 0.12 * Math.sin(((monthNum - 2) * Math.PI) / 6);
-        const previousYear = Math.round(
-          baseYield * 0.9 * prevSeasonal * (averageHealth / 100),
-        );
-
-        // Forecast for last 3 months
-        const forecast = !isPast
-          ? Math.max(
-              0,
-              Math.round(reg.slope * (i) + reg.intercept),
-            )
-          : undefined;
-
-        // Confidence bands (±1 std dev of residuals)
-        const residuals = historicalYields.map(
-          (y, j) => y - (reg.slope * j + reg.intercept),
-        );
-        const stdDev = Math.sqrt(residuals.reduce((a, r) => a + r * r, 0) / residuals.length);
-        const forecastUpper = forecast !== undefined ? Math.round(forecast + stdDev) : undefined;
-        const forecastLower = forecast !== undefined ? Math.max(0, Math.round(forecast - stdDev)) : undefined;
+        const result = estimateYield({
+          treeAgeYears: farmAvgAge,
+          healthyCount: healthyCountForMonth,
+          totalCount: totalCountForMonth,
+          season: seasonForMonth(monthNum0),
+          // No historical weather record per past month is available here;
+          // the engine falls back to a neutral weather factor (1.0) and
+          // flags the gap via its own completeness/confidence accounting.
+          temperatureC: NaN,
+          rainfallMm: NaN,
+        });
 
         return {
           period: label,
-          yield: currentYield,
-          forecast,
-          forecastUpper,
-          forecastLower,
-          previousYear,
+          yield: totalCountForMonth > 0 ? result.estimatedYield * totalCountForMonth : undefined,
         };
       });
 
-      // ── 7. Total yield (sum of historical months) ─────────────────────────
-      const totalYield = historicalYields.reduce((a, b) => a + b, 0);
+      // ── 7. Total yield (sum of the 12 monthly estimates) ──────────────────
+      const totalYield = trends.reduce((a, t) => a + (t.yield ?? 0), 0);
 
-      // ── 8. Cluster performance ─────────────────────────────────────────────
+      // ── 8. Cluster performance — rule-based, with real healthyCount/avgAge ─
       const clustersSnap = await getDocs(collection(db, 'farms', farmId, 'clusters'));
       const clusterDocs = clustersSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-      const clusterPerf: ClusterPerformance[] = await Promise.all(
-        clusterDocs.slice(0, 8).map(async (cluster) => {
-          const clusterTrees = trees.filter(
-            (t) => t.cluster === cluster.id || t.cluster === cluster.name,
-          );
-          const clusterHealthy = clusterTrees.filter(
-            (t) => (t.healthStatus ?? '').toLowerCase() === 'healthy',
-          ).length;
-          const healthPct =
-            clusterTrees.length > 0
-              ? Math.round((clusterHealthy / clusterTrees.length) * 100)
-              : 0;
-          const yieldPerTree = Math.round(22 * (0.4 + 0.6 * (healthPct / 100)));
-          const totalClusterYield = yieldPerTree * clusterTrees.length;
+      const currentSeason = detectSeasonFromDate();
 
-          // Trend: compare health to overall average
-          const trendPct = healthPct - averageHealth;
+      const clusterPerf: ClusterPerformance[] = clusterDocs.slice(0, 8).map((cluster) => {
+        const clusterTrees = trees.filter(
+          (t) => t.cluster === cluster.id || t.cluster === cluster.name,
+        );
+        const clusterHealthy = clusterTrees.filter(
+          (t) => (t.healthStatus ?? '').toLowerCase() === 'healthy',
+        ).length;
+        const healthPct =
+          clusterTrees.length > 0
+            ? Math.round((clusterHealthy / clusterTrees.length) * 100)
+            : 0;
 
-          return {
-            clusterId: cluster.id,
-            clusterName: cluster.name ?? cluster.id,
-            farmId: farmId,
-            farmName: cluster.farmName ?? 'Your Farm',
-            treeCount: clusterTrees.length,
-            healthyPercentage: healthPct,
-            yieldPerTree,
-            totalYield: totalClusterYield,
-            trend: trendPct > 5 ? 'up' : trendPct < -5 ? 'down' : 'stable',
-            trendPercentage: trendPct,
-          } as ClusterPerformance;
-        }),
-      );
+        const clusterAges = clusterTrees.map(getTreeAgeYears).filter((a): a is number => a != null);
+        const clusterAvgAge = clusterAges.length > 0 ? average(clusterAges) : farmAvgAge;
+
+        const result = estimateYield({
+          treeAgeYears: clusterAvgAge,
+          healthyCount: clusterHealthy,
+          totalCount: clusterTrees.length,
+          season: currentSeason,
+          // No per-cluster weather lookup is wired here yet — pass through
+          // NaN so the engine applies its own documented neutral fallback
+          // and reflects the gap in its confidence score, rather than this
+          // hook silently guessing a number.
+          temperatureC: NaN,
+          rainfallMm: NaN,
+        });
+
+        const trendPct = healthPct - averageHealth;
+
+        return {
+          clusterId: cluster.id,
+          clusterName: cluster.name ?? cluster.id,
+          farmId: farmId,
+          farmName: cluster.farmName ?? 'Your Farm',
+          treeCount: clusterTrees.length,
+          healthyCount: clusterHealthy,
+          healthyPercentage: healthPct,
+          avgAge: Math.round(clusterAvgAge * 10) / 10,
+          yieldPerTree: result.estimatedYield,
+          totalYield: result.estimatedYield * clusterTrees.length,
+          trend: trendPct > 5 ? 'up' : trendPct < -5 ? 'down' : 'stable',
+          trendPercentage: trendPct,
+        } as ClusterPerformance;
+      });
 
       // ── 9. Health distribution ────────────────────────────────────────────
       const healthDist: HealthDistribution[] = [
@@ -317,7 +356,7 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
       setClusterPerformance(
         clusterPerf.length > 0
           ? clusterPerf
-          : generateFallbackClusters(trees, averageHealth),
+          : generateFallbackClusters(trees, averageHealth, farmAvgAge),
       );
       setDiseaseFrequency(diseaseFreq.length > 0 ? diseaseFreq : generateFallbackDiseases());
       setHealthDistribution(healthDist);
@@ -339,28 +378,44 @@ export function useAnalytics(farmId?: string, filters?: AnalyticsFilters) {
     clusterPerformance,
     diseaseFrequency,
     healthDistribution,
-    predictionConfidence,
-    forecastTrend,
     refetch: fetchData,
   };
 }
 
 // ─── Fallbacks when DB has no cluster/disease data yet ────────────────────────
-function generateFallbackClusters(trees: any[], avgHealth: number): ClusterPerformance[] {
+//
+// Used only when a farm has zero cluster documents but does have trees —
+// e.g. a brand-new farm that hasn't organized trees into clusters yet. Still
+// routes through the real engine rather than inventing separate numbers.
+function generateFallbackClusters(trees: any[], avgHealth: number, farmAvgAge: number): ClusterPerformance[] {
   const names = ['North Orchard', 'South Orchard', 'East Block', 'West Block'];
   const chunk = Math.ceil(trees.length / 4) || 1;
+  const currentSeason = detectSeasonFromDate();
+
   return names.map((name, i) => {
     const h = Math.min(100, Math.max(0, avgHealth + (i % 2 === 0 ? 5 : -5)));
-    const ypt = Math.round(22 * (0.4 + 0.6 * (h / 100)));
+    const healthyCount = Math.round((h / 100) * chunk);
+
+    const result = estimateYield({
+      treeAgeYears: farmAvgAge,
+      healthyCount,
+      totalCount: chunk,
+      season: currentSeason,
+      temperatureC: NaN,
+      rainfallMm: NaN,
+    });
+
     return {
       clusterId: `c${i + 1}`,
       clusterName: name,
       farmId: '',
       farmName: 'Your Farm',
       treeCount: chunk,
+      healthyCount,
       healthyPercentage: h,
-      yieldPerTree: ypt,
-      totalYield: ypt * chunk,
+      avgAge: Math.round(farmAvgAge * 10) / 10,
+      yieldPerTree: result.estimatedYield,
+      totalYield: result.estimatedYield * chunk,
       trend: h > avgHealth ? 'up' : h < avgHealth ? 'down' : 'stable',
       trendPercentage: h - avgHealth,
     };
