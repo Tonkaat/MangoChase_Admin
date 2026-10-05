@@ -28,7 +28,8 @@ export function ScanFilters({
     filters.search !== defaultScanFilters.search ||
     filters.disease !== defaultScanFilters.disease ||
     filters.status !== defaultScanFilters.status ||
-    filters.cluster !== defaultScanFilters.cluster;
+    filters.cluster !== defaultScanFilters.cluster || 
+    filters.verification !== defaultScanFilters.verification;
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-soft md:flex-row md:items-center md:justify-between">
@@ -91,6 +92,23 @@ export function ScanFilters({
                 {cluster}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={filters.verification}
+          onValueChange={(value) =>
+            onChange({ ...filters, verification: value as ScanFiltersState["verification"] })
+          }
+        >
+          <SelectTrigger className="w-[170px]">
+            <SelectValue placeholder="Verification" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All verification</SelectItem>
+            <SelectItem value="pending">Needs verification</SelectItem>
+            <SelectItem value="verified">Verified</SelectItem>
+            <SelectItem value="not_required">Not required</SelectItem>
           </SelectContent>
         </Select>
 

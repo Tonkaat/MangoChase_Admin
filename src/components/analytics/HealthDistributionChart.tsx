@@ -32,15 +32,17 @@ export function HealthDistributionChart({ data, loading }: HealthDistributionCha
 
   const total = data.reduce((sum, item) => sum + item.count, 0);
 
-  const chartData = data.map((item) => {
-    const config = STATUS_CONFIG[item.status as keyof typeof STATUS_CONFIG] ?? FALLBACK_CONFIG;
-    return {
-      name: config.label,
-      value: item.count,
-      percentage: item.percentage,
-      color: config.color,
-    };
-  });
+  const chartData = data
+    .filter((item) => item.count > 0)
+    .map((item) => {
+      const config = STATUS_CONFIG[item.status as keyof typeof STATUS_CONFIG] ?? FALLBACK_CONFIG;
+      return {
+        name: config.label,
+        value: item.count,
+        percentage: item.percentage,
+        color: config.color,
+      };
+    });
 
   if (total === 0) {
     return (
@@ -60,45 +62,59 @@ export function HealthDistributionChart({ data, loading }: HealthDistributionCha
       <CardHeader>
         <CardTitle className="text-base">Health Distribution</CardTitle>
       </CardHeader>
-      <CardContent className="h-72 relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={chartData}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={90}
-              paddingAngle={2}
-              dataKey="value"
-              label={({ percentage }) => `${percentage}%`}
-              labelLine={false}
-            >
-              {chartData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                borderRadius: 12,
-                borderColor: 'hsl(var(--border))',
-                backgroundColor: 'hsl(var(--popover))',
-                color: 'hsl(var(--popover-foreground))',
-              }}
-              formatter={(value: number, name: string) => [
-                `${value} trees (${chartData.find((d) => d.name === name)?.percentage}%)`,
-                name,
-              ]}
-            />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
-        {/* Center total, absolutely positioned over the donut hole */}
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center -mt-4">
-          <span className="text-2xl font-bold">{total}</span>
-          <span className="text-xs text-muted-foreground">trees</span>
-        </div>
-      </CardContent>
+        <CardContent className="space-y-4">
+          <div className="relative h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={chartData.length > 1 ? 2 : 0}
+                  dataKey="value"
+                  label={false}
+                  labelLine={false}
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: 12,
+                    borderColor: 'hsl(var(--border))',
+                    backgroundColor: 'hsl(var(--popover))',
+                    color: 'hsl(var(--popover-foreground))',
+                  }}
+                  formatter={(value: number, name: string) => [
+                    `${value} trees (${chartData.find((d) => d.name === name)?.percentage}%)`,
+                    name,
+                  ]}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+
+            {/* Center total, same box as the donut so it's exactly centered */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-bold leading-none">{total}</span>
+              <span className="mt-1 text-xs text-muted-foreground">trees</span>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+            {chartData.map((entry) => (
+              <div key={entry.name} className="flex items-center gap-1.5 text-xs">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-foreground">
+                  {entry.name} · {entry.percentage}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
     </Card>
   );
 }

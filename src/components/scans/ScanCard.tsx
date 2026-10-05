@@ -39,6 +39,18 @@ export function ScanCard({ scan, onClick }: ScanCardProps) {
         <div className="absolute left-2 top-2">
           <ScanStatusBadge status={scan.infectionStatus} />
         </div>
+        {scan.verificationStatus !== "not_required" && (
+          <span
+            className={cn(
+              "absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+              scan.verificationStatus === "pending"
+                ? "bg-amber-100 text-amber-800"
+                : "bg-emerald-100 text-emerald-800"
+            )}
+          >
+            {scan.verificationStatus === "pending" ? "Needs verification" : "Verified by admin"}
+          </span>
+        )}
       </div>
 
       <CardContent className="space-y-2 p-4">

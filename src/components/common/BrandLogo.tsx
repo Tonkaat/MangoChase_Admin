@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import logo from "../../assets/icons/logo.png";
 
 type BrandLogoProps = {
   className?: string;
@@ -10,7 +11,7 @@ type BrandLogoProps = {
 export function BrandLogo({ 
   className, 
   title = "Mango Chase",
-  logoUrl = "/src/assets/icons/logo.png",
+  logoUrl = logo,
   collapsed = false,
 }: BrandLogoProps) {
   return (

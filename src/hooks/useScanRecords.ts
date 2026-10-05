@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scanService } from "@/services/firebase/scanService";
 import { treeService } from "@/services/firebase/treeService";
-import { ScanRecord, deriveInfectionStatus } from "@/types/scan.types";
+import { ScanRecord, deriveInfectionStatus, deriveVerificationStatus } from "@/types/scan.types";
 
 interface TreeLookup {
   treeName: string;
@@ -85,27 +85,36 @@ export function useScanRecords(
     };
   }, [farmId, scanLimit]);
 
-  const scans = useMemo<ScanRecord[]>(() => {
-    if (!rawScans || !treeMap) return [];
+const scans = useMemo<ScanRecord[]>(() => {
+  if (!rawScans || !treeMap) return [];
 
-    return rawScans.map((raw) => {
-      const lookup = raw.treeId ? treeMap.get(raw.treeId) ?? UNKNOWN_TREE : UNKNOWN_TREE;
-      const detectedDisease = raw.detectedDisease || "Unknown";
+  return rawScans.map((raw) => {
+    const lookup = raw.treeId ? treeMap.get(raw.treeId) ?? UNKNOWN_TREE : UNKNOWN_TREE;
+    const detectedDisease = raw.detectedDisease || "Unknown";
+    const confidence = typeof raw.confidence === "number" ? raw.confidence : 0;
 
-      return {
-        id: raw.id,
-        treeId: raw.treeId ?? null,
-        treeName: lookup.treeName,
-        treeBarcodeId: lookup.treeBarcodeId,
-        clusterName: lookup.clusterName,
-        imageUrl: raw.imageUrl,
+    return {
+      id: raw.id,
+      treeId: raw.treeId ?? null,
+      treeName: lookup.treeName,
+      treeBarcodeId: lookup.treeBarcodeId,
+      clusterName: lookup.clusterName,
+      imageUrl: raw.imageUrl,
+      detectedDisease,
+      infectionStatus: deriveInfectionStatus(detectedDisease),
+      confidence,
+      createdAt: raw.timestamp?.toDate?.() ?? new Date(0),
+      verificationStatus: deriveVerificationStatus(
         detectedDisease,
-        infectionStatus: deriveInfectionStatus(detectedDisease),
-        confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
-        createdAt: raw.timestamp?.toDate?.() ?? new Date(0),
-      };
-    });
-  }, [rawScans, treeMap]);
+        confidence,
+        raw.verificationStatus
+      ),
+      verifiedBy: raw.verifiedBy ?? null,
+      verifiedAt: raw.verifiedAt?.toDate?.() ?? null,
+      expertContacted: raw.expertContacted ?? null,
+    };
+  });
+}, [rawScans, treeMap]);
 
   const isLoading = !!farmId && (rawScans === null || treeMap === null);
 

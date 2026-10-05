@@ -1,12 +1,13 @@
 // src/pages/DiseaseScanRecords.tsx
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ScanSearch, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, ScanSearch, RefreshCw, ChevronLeft, ChevronRight, ScanLine } from "lucide-react";
 import { firebaseService } from "@/services/firebase";
 import { useScanRecords } from "@/hooks/useScanRecords";
 import { ScanCard } from "@/components/scans/ScanCard";
 import { ScanFilters } from "@/components/scans/ScanFilters";
 import { ScanDetailsModal } from "@/components/scans/ScanDetailsModal";
+import { DebugScanCard } from "@/components/scans/DebugScanCard";
 import {
   ScanRecord,
   ScanFiltersState,
@@ -224,19 +225,30 @@ export default function DiseaseScanRecords() {
   // ── Main content ──
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Disease Detection Logs
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Live AI scan results from mango leaf disease detection.
-          </p>
+      {/* Page header */}
+      <header>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-primary/10 p-2.5">
+              <ScanLine className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display text-3xl font-bold tracking-tight">
+                Disease Detection Logs
+              </h1>
+              <p className="text-muted-foreground">
+                Live AI scan results from mango leaf disease detection.
+              </p>
+            </div>
+          </div>
+          <div className="text-sm text-muted-foreground sm:pt-2">
+            Showing {filteredScans.length} record{filteredScans.length !== 1 ? "s" : ""}
+          </div>
         </div>
-        <div className="text-sm text-muted-foreground">
-          Showing {filteredScans.length} record{filteredScans.length !== 1 ? "s" : ""}
-        </div>
-      </div>
+      </header>
+
+      {/* Debugging tool for developers to see raw scan data */}
+      {import.meta.env.DEV && <DebugScanCard farmId={farmId} />}
 
       <ScanFilters
         filters={filters}
@@ -336,7 +348,7 @@ export default function DiseaseScanRecords() {
         </>
       )}
 
-      <ScanDetailsModal scan={selectedScan} onClose={() => setSelectedScan(null)} />
+      <ScanDetailsModal scan={selectedScan} farmId={farmId} onClose={() => setSelectedScan(null)} />
     </div>
   );
 }

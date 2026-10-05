@@ -339,7 +339,7 @@ export function AnalyticsPDFReport({
                     <Text style={[styles.tableCell, styles.colCluster]}>{c.clusterName}</Text>
                     <Text style={[styles.tableCell, styles.colTrees]}>{c.treeCount.toLocaleString()}</Text>
                     <Text style={[styles.tableCell, styles.colHealthy]}>{Math.round(c.healthyPercentage)}%</Text>
-                    <Text style={[styles.tableCell, styles.colAge]}>{c.avgAge.toFixed(1)} yrs</Text>
+                    <Text style={[styles.tableCell, styles.colAge]}>{c.avgAge.toFixed(1)} yrs</Text>  
                   </View>
                 );
               })}

@@ -217,6 +217,18 @@ export class UserService {
       return false;
     }
   }
+
+  //new
+  async getUsersByFarm(farmId: string): Promise<Record<string, any>[]> {
+    try {
+      const q = query(collection(db, 'users'), where('farmId', '==', farmId));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (error) {
+      console.error('Error getting users by farm:', error);
+      return [];
+    }
+  }
 }
 
 export const userService = new UserService();

@@ -74,6 +74,31 @@ export class ScanService {
     console.log('📸 Scan updated:', scanId);
   }
 
+  async verifyScan(
+    farmId: string,
+    scanId: string,
+    details: { expertContacted?: string; notes?: string } = {}
+  ): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error("No user logged in");
+
+    await this.updateScan(farmId, scanId, {
+      verificationStatus: "verified",
+      verifiedBy: userId,
+      verifiedAt: serverTimestamp(),
+      expertContacted: details.expertContacted ?? null,
+      verificationNotes: details.notes ?? null,
+    });
+  }
+
+  async deleteTestScans(farmId: string): Promise<number> {
+    const snapshot = await getDocs(
+      query(collection(db, 'farms', farmId, 'scans'), where('isTest', '==', true))
+    );
+    await Promise.all(snapshot.docs.map((d) => deleteDoc(d.ref)));
+    return snapshot.size;
+  }
+
   async deleteScan(farmId: string, scanId: string): Promise<void> {
     await deleteDoc(doc(db, 'farms', farmId, 'scans', scanId));
     console.log('🗑️ Scan deleted:', scanId);

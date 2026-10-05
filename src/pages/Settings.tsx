@@ -156,7 +156,7 @@ export default function Settings() {
         )}
 
         {/* Appearance */}
-        <Card className="shadow-soft">
+        {/* <Card className="shadow-soft">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Palette className="h-5 w-5 text-primary" />
@@ -207,7 +207,7 @@ export default function Settings() {
               </Select>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Notifications */}
         <Card className="shadow-soft">
@@ -243,7 +243,7 @@ export default function Settings() {
               />
             </div>
 
-            <Separator />
+            {/* <Separator />
 
             <p className="text-sm font-medium text-muted-foreground">Notification Types</p>
 
@@ -272,12 +272,12 @@ export default function Settings() {
                 checked={marketUpdates}
                 onCheckedChange={setMarketUpdates}
               />
-            </div>
+            </div> */}
           </CardContent>
         </Card>
 
         {/* Profile */}
-        <Card className="shadow-soft">
+        {/* <Card className="shadow-soft">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Shield className="h-5 w-5 text-primary" />
@@ -309,10 +309,10 @@ export default function Settings() {
               Save Changes
             </Button>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Data & Storage */}
-        <Card className="shadow-soft">
+        {/* <Card className="shadow-soft">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Database className="h-5 w-5 text-primary" />
@@ -343,7 +343,7 @@ export default function Settings() {
               </Button>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { userService } from "@/services/firebase/userService";
 import { Button } from "@/components/ui/button";
 import { TreeInventoryTable } from "@/components/trees/TreeInventoryTable";
 import { TreeFilters } from "@/components/trees/TreeFilters";
@@ -102,7 +103,7 @@ interface FarmerProfile {
   email?: string;
   avatarUrl?: string;
   role?: string;
-  clusterAssignment?: string;
+  assignedClusters: string[];
 }
 
 const initialFilters: TreeFilter = {
@@ -169,6 +170,24 @@ export default function TreeManagement() {
     };
   }, []);
 
+  useEffect(() => {
+  if (!farmId) return;
+  userService.getUsersByFarm(farmId).then((users) => {
+    setFarmers(
+      users
+        .filter((u) => u.role === "farmer")
+        .map((u) => ({
+          id: u.id,
+          name: u.name || "Unnamed",
+          email: u.email,
+          avatarUrl: u.photoURL || u.avatarUrl,
+          role: u.role,
+          assignedClusters: u.assignedClusters ?? [],
+        }))
+    );
+  });
+}, [farmId]);
+
   // ── Converters ───────────────────────────────────────────────────────────────
 
   const convertFirestoreTree = (ft: FirestoreTree): Tree =>
@@ -176,16 +195,13 @@ export default function TreeManagement() {
 
   const convertFirestoreCluster = useCallback(
     (fc: FirestoreCluster): Cluster => {
-      // Use pre-aggregated treeCount if available; otherwise count client-side
       const fallbackCount = trees.filter((t) => t.cluster === fc.name).length;
-      const base = convertFirestoreClusterHelper(
+      return convertFirestoreClusterHelper(
         { id: fc.id, ...fc },
         fc.treeCount ?? fallbackCount,
       );
-      const assignedUsers = farmers.filter((f) => f.clusterAssignment === fc.name);
-      return { ...base, assignedUsers } as any;
     },
-    [trees, farmers],
+    [trees],
   );
 
   // ── Real-time listeners ──────────────────────────────────────────────────────
@@ -211,13 +227,23 @@ export default function TreeManagement() {
       setClusters((prev) =>
         prev.map((c) => ({
           ...c,
-          assignedUsers: farmers.filter((f) => f.clusterAssignment === c.name),
+          assignedUsers: farmers.filter((f) => f.assignedClusters.includes(c.name)),
         })),
       );
     }
   }, [farmers]);
 
   const clusterNames = useMemo(() => clusters.map((c) => c.name), [clusters]);
+
+  const clustersWithUsers = useMemo(() => {
+  const norm = (s: string) => s.trim().toLowerCase();
+    return clusters.map((cluster) => ({
+      ...cluster,
+      assignedUsers: farmers
+        .filter((f) => f.assignedClusters.some((name) => norm(name) === norm(cluster.name)))
+        .map(({ id, name, email, avatarUrl, role }) => ({ id, name, email, avatarUrl, role })),
+    }));
+  }, [clusters, farmers]);
 
   // ── Stats ────────────────────────────────────────────────────────────────────
 
@@ -602,7 +628,7 @@ export default function TreeManagement() {
         {/* Sidebar */}
         <div className="space-y-4">
           <ClusterManagement
-            clusters={clusters as any}
+            clusters={clustersWithUsers as any}
             selectedCluster={selectedCluster}
             onSelectCluster={setSelectedCluster}
             onCreateCluster={handleCreateCluster}

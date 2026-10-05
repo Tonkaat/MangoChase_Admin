@@ -36,7 +36,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { BarChart3, Sparkles, Loader2 } from 'lucide-react';
+import { BarChart3, Sparkles, Loader2, RefreshCw, FileDown } from 'lucide-react';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { AnalyticsOverview } from '@/components/analytics/AnalyticsOverview';
 import { AnalyticsFilters } from '@/components/analytics/AnalyticsFilters';
@@ -44,11 +44,12 @@ import { ClusterPerformanceTable } from '@/components/analytics/ClusterPerforman
 import { DiseaseFrequencyChart } from '@/components/analytics/DiseaseFrequencyChart';
 import { HealthDistributionChart } from '@/components/analytics/HealthDistributionChart';
 import { YieldEstimation, buildClusterRawData } from '@/components/analytics/YieldEstimation';
-import { downloadTextFile, generateAnalyticsPDF } from '@/utils/exportHelpers';
+import { generateAnalyticsPDF } from '@/utils/exportHelpers';
 import { firebaseService } from '@/services/firebase';
 import { farmService } from '@/services/firebase/farmService';
 import { weatherService } from '@/services/weatherService';
 import type { WeatherData } from '@/types/weather.types';
+import { Button } from '@/components/common/Button';
 
 export default function Analytics() {
   const [farmId, setFarmId] = useState<string | null>(null);
@@ -172,22 +173,19 @@ export default function Analytics() {
     ),
   );
 
-const handleExport = async (format: 'csv' | 'pdf') => {
-    if (format === 'csv') {
-      const headers = ['Period', 'Estimated Yield (kg)'];
-      const rows = yieldTrends.map((t) => [t.period, t.yield ?? ''].join(','));
-      const csv = [headers.join(','), ...rows].join('\n');
-      downloadTextFile('analytics-yield-trends.csv', csv);
-      toast.success('CSV exported successfully');
-    } else {
-      try {
-        toast.loading('Generating PDF report...', { id: 'pdf-export' });
-        await generateAnalyticsPDF({ overallStats, healthDistribution, clusterPerformance });
-        toast.success('PDF report generated', { id: 'pdf-export' });
-      } catch (err) {
-        console.error('❌ Analytics: PDF generation failed', err);
-        toast.error('Failed to generate PDF report', { id: 'pdf-export' });
-      }
+const [exporting, setExporting] = useState(false);
+
+  const handleExportPDF = async () => {
+    try {
+      setExporting(true);
+      toast.loading('Generating PDF report...', { id: 'pdf-export' });
+      await generateAnalyticsPDF({ overallStats, healthDistribution, clusterPerformance });
+      toast.success('PDF report generated', { id: 'pdf-export' });
+    } catch (err) {
+      console.error('❌ Analytics: PDF generation failed', err);
+      toast.error('Failed to generate PDF report', { id: 'pdf-export' });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -227,30 +225,40 @@ const handleExport = async (format: 'csv' | 'pdf') => {
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
-      <header>
-        <div className="flex items-start gap-4">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
           <div className="rounded-xl bg-primary/10 p-2.5">
             <BarChart3 className="h-6 w-6 text-primary" />
           </div>
-          <div className="flex-1">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="font-display text-3xl font-bold">Mango Analytics</h1>
-            </div>
-            <p className="text-muted-foreground">
+          <div>
+            <h1 className="font-display text-3xl font-bold">Mango Analytics</h1>
+            <p className="text-sm text-muted-foreground">
               Live farm intelligence · Yield estimation · Disease risk analysis
             </p>
           </div>
         </div>
-      </header>
 
-      {/* ── Controls ── */}
-      <AnalyticsFilters onRefresh={refetch} onExport={handleExport} loading={analyticsLoading} />
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={analyticsLoading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button size="sm" onClick={handleExportPDF} disabled={analyticsLoading || exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileDown className="mr-2 h-4 w-4" />
+            )}
+            Export PDF
+          </Button>
+        </div>
+      </header>
 
       {/* ── KPI overview ── */}
       <AnalyticsOverview stats={overallStats} loading={analyticsLoading} />
 
       {/* ── Main content ── */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
         <div className="lg:col-span-2">
           <YieldEstimation
             farmId={farmId}
@@ -267,7 +275,6 @@ const handleExport = async (format: 'csv' | 'pdf') => {
 
       {/* ── Cluster table ── */}
       <ClusterPerformanceTable data={clusterPerformance} loading={analyticsLoading} />
-
       {/* ── Disease frequency ── */}
       {/* <DiseaseFrequencyChart data={diseaseFrequency} loading={analyticsLoading} /> */}
     </div>

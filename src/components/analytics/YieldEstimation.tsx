@@ -368,8 +368,9 @@ export function YieldEstimation({
       setLastUpdated(new Date());
 
       // Auto-expand the worst-performing cluster, same convenience as before.
-      const worst = computed.reduce((a, b) => (a.estimatedYield < b.estimatedYield ? a : b));
-      setExpandedCluster(worst.clusterId);
+      // const worst = computed.reduce((a, b) => (a.estimatedYield < b.estimatedYield ? a : b));
+      // setExpandedCluster(worst.clusterId);
+      setExpandedCluster(null);
     } catch (err: any) {
       console.error('Yield estimation error:', err);
       setError(err?.message ?? 'Unable to compute yield estimate. Please check your cluster data.');
